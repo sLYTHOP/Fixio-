@@ -1,13 +1,24 @@
 <script>
   import { trackEvent } from './analytics.js'
+  import { signInWithGoogle } from './supabase.js'
 
   export let open = false
   export let onClose = () => {}
 
-  function handleGoogle() {
+  let loading = false
+  let error = ''
+
+  async function handleGoogle() {
     trackEvent('google_signin_clicked')
-    // TODO: wire up real Google OAuth here.
-    onClose()
+    loading = true
+    error = ''
+    const { error: authError } = await signInWithGoogle()
+    if (authError) {
+      error = 'Something went wrong signing in. Please try again.'
+      loading = false
+      console.error(authError)
+    }
+    // On success, Supabase redirects the browser to Google, so nothing else runs here.
   }
 
   function handleKeydown(e) {
@@ -49,7 +60,8 @@
 
       <button
         on:click={handleGoogle}
-        class="mt-6 w-full flex items-center justify-center gap-3 font-semibold text-sm px-6 py-3.5 rounded-full border transition-colors hover:bg-[var(--paper)]"
+        disabled={loading}
+        class="mt-6 w-full flex items-center justify-center gap-3 font-semibold text-sm px-6 py-3.5 rounded-full border transition-colors hover:bg-[var(--paper)] disabled:opacity-60"
         style="border-color: var(--line);"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -58,8 +70,13 @@
           <path fill="#FBBC05" d="M3.95 10.7a5.4 5.4 0 0 1 0-3.4V4.97H.95a9 9 0 0 0 0 8.06l3-2.33Z"/>
           <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .95 4.97l3 2.33C4.66 5.17 6.65 3.58 9 3.58Z"/>
         </svg>
-        Continue with Google
+        {loading ? 'Redirecting to Google…' : 'Continue with Google'}
       </button>
+
+      {#if error}
+        <p class="mt-3 text-xs text-center" style="color: var(--coral);">{error}</p>
+      {/if}
+
 
       <p class="mt-4 text-xs text-center" style="color: var(--ink-soft);">
         By continuing, you agree to our Terms and Privacy Policy.

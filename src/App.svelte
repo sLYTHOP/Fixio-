@@ -7,11 +7,24 @@
   import Footer from './lib/Footer.svelte'
   import SignInModal from './lib/SignInModal.svelte'
   import { initAnalytics } from './lib/analytics.js'
+  import { supabase, signOut } from './lib/supabase.js'
 
   let modalOpen = false
+  let user = null
 
   onMount(() => {
     initAnalytics()
+
+    supabase.auth.getSession().then(({ data }) => {
+      user = data.session?.user ?? null
+    })
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      user = session?.user ?? null
+      if (user) modalOpen = false
+    })
+
+    return () => listener.subscription.unsubscribe()
   })
 
   function openModal() {
@@ -23,8 +36,8 @@
 </script>
 
 <main>
-  <Nav onSignIn={openModal} />
-  <Hero onGetStarted={openModal} />
+  <Nav {user} onSignIn={openModal} onSignOut={signOut} />
+  <Hero {user} onGetStarted={openModal} />
   <HowItWorks />
   <Pricing onGetStarted={openModal} />
   <Footer />

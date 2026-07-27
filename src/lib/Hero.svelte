@@ -3,6 +3,7 @@
   import gsap from 'gsap'
   import { trackEvent } from './analytics.js'
 
+  export let user = null
   export let onGetStarted = () => {}
 
   let cardEl
@@ -56,6 +57,7 @@
   })
 
   function handleClick(location) {
+    if (user) return
     trackEvent('get_started_clicked', { location })
     onGetStarted()
   }
@@ -92,7 +94,7 @@
         class="font-display font-semibold text-base px-7 py-4 rounded-full transition-transform hover:-translate-y-0.5"
         style="background: var(--ink); color: var(--paper);"
       >
-        Get started for free
+        {user ? "You're signed in — upload coming next" : 'Get started for free'}
       </button>
       <button
         on:click={scrollToHowItWorks}
