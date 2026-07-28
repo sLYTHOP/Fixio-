@@ -24,3 +24,11 @@ export async function signInWithGoogle() {
 export async function signOut() {
   return supabase.auth.signOut()
 }
+
+export async function uploadResume(userId, file) {
+  const path = `${userId}/${Date.now()}-${file.name}`
+  const { data, error } = await supabase.storage.from('resumes').upload(path, file, {
+    upsert: true,
+  })
+  return { data, error }
+}
