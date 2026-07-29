@@ -1,13 +1,15 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { uploadResume } from './supabase.js'
-  import { getPendingResume, clearPendingResume } from './pendingResume.js'
+  import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
 
   export let user
 
   let stage = 'uploading' // uploading -> processing -> done -> error
   let uploadError = ''
+  let roleMeta = null
+  let waitlistClicked = false
 
   const phrases = [
     "Alright, let's see what we've got here...",
@@ -29,6 +31,7 @@
 
   onMount(async () => {
     const file = getPendingResume()
+    roleMeta = getPendingMeta()
     if (!file) {
       stage = 'error'
       uploadError = "We couldn't find your resume — please upload it again."
@@ -79,7 +82,7 @@
 
     {:else if stage === 'done'}
       <h1 class="font-display text-3xl font-bold tracking-tight">
-        Alright {firstName}, here's the deal
+        Alright {firstName}, here's how you match up{roleMeta?.role ? ` for ${roleMeta.role}` : ''}
       </h1>
       <p class="mt-2 text-sm" style="color: var(--ink-soft);">
         This is a preview layout — real AI-generated feedback is coming soon.
@@ -106,6 +109,19 @@
             <li>• {s}</li>
           {/each}
         </ul>
+      </div>
+
+      <div class="mt-6 rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
+        <p class="font-display font-semibold">Want a step-by-step plan to close these gaps?</p>
+        <p class="mt-1 text-sm opacity-80">Courses, certifications, and projects — prioritized for you.</p>
+        <button
+          on:click={() => { waitlistClicked = true; trackEvent('roadmap_interest_clicked', { role: roleMeta?.role }) }}
+          disabled={waitlistClicked}
+          class="mt-4 font-display font-semibold text-sm px-6 py-3 rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+          style="background: var(--lime); color: var(--ink);"
+        >
+          {waitlistClicked ? "You're on the list!" : 'Join the waitlist'}
+        </button>
       </div>
 
     {:else if stage === 'error'}

@@ -22,6 +22,11 @@ export function initAnalytics() {
   initialized = true
 }
 
+export function identifyUser(user) {
+  if (!initialized || !user) return
+  posthog.identify(user.id, { email: user.email })
+}
+
 // Use this for meaningful product moments beyond autocapture,
 // e.g. trackEvent('get_started_clicked')
 export function trackEvent(name, props = {}) {

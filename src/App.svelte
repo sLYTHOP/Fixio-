@@ -7,27 +7,32 @@
   import Footer from './lib/Footer.svelte'
   import SignInModal from './lib/SignInModal.svelte'
   import UploadModal from './lib/UploadModal.svelte'
+  import RoleModal from './lib/RoleModal.svelte'
   import ResultsPage from './lib/ResultsPage.svelte'
-  import { initAnalytics } from './lib/analytics.js'
+  import { initAnalytics, identifyUser } from './lib/analytics.js'
   import { supabase, signOut } from './lib/supabase.js'
   import { stashPendingResume, hasPendingResume } from './lib/pendingResume.js'
 
   let user = null
   let uploadModalOpen = false
+  let roleModalOpen = false
   let signInModalOpen = false
   let view = 'landing' // 'landing' | 'results'
+  let pendingFile = null // held in memory between upload and role questionnaire
 
   onMount(() => {
     initAnalytics()
 
     supabase.auth.getSession().then(({ data }) => {
       user = data.session?.user ?? null
+      if (user) identifyUser(user)
       if (user && hasPendingResume()) view = 'results'
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       user = session?.user ?? null
       if (user) {
+        identifyUser(user)
         signInModalOpen = false
         if (hasPendingResume()) view = 'results'
       } else {
@@ -44,9 +49,16 @@
     uploadModalOpen = true
   }
 
-  async function handleFileReady(file) {
-    await stashPendingResume(file)
+  function handleFileReady(file) {
+    pendingFile = file
     uploadModalOpen = false
+    roleModalOpen = true
+  }
+
+  async function handleRoleSubmit(meta) {
+    await stashPendingResume(pendingFile, meta)
+    pendingFile = null
+    roleModalOpen = false
     signInModalOpen = true
   }
 
@@ -68,4 +80,5 @@
 {/if}
 
 <UploadModal open={uploadModalOpen} onClose={() => (uploadModalOpen = false)} onFileReady={handleFileReady} />
+<RoleModal open={roleModalOpen} onClose={() => (roleModalOpen = false)} onSubmit={handleRoleSubmit} />
 <SignInModal open={signInModalOpen} onClose={() => (signInModalOpen = false)} />

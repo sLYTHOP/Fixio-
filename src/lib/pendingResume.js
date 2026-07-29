@@ -1,6 +1,7 @@
 const KEY = 'fixio_pending_resume'
+const META_KEY = 'fixio_pending_meta'
 
-export async function stashPendingResume(file) {
+export async function stashPendingResume(file, meta) {
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result.split(',')[1])
@@ -8,6 +9,7 @@ export async function stashPendingResume(file) {
     reader.readAsDataURL(file)
   })
   sessionStorage.setItem(KEY, JSON.stringify({ name: file.name, type: file.type, data: base64 }))
+  if (meta) sessionStorage.setItem(META_KEY, JSON.stringify(meta))
 }
 
 export function getPendingResume() {
@@ -25,8 +27,19 @@ export function getPendingResume() {
   }
 }
 
+export function getPendingMeta() {
+  const raw = sessionStorage.getItem(META_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch (e) {
+    return null
+  }
+}
+
 export function clearPendingResume() {
   sessionStorage.removeItem(KEY)
+  sessionStorage.removeItem(META_KEY)
 }
 
 export function hasPendingResume() {
