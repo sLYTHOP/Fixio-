@@ -6,52 +6,22 @@
   export let user = null
   export let onGetStarted = () => {}
 
-  let cardEl
+  let windowEl
   let scanEl
-  let tagEls = []
-  let floatEls = []
-
-  const floatingCards = [
-    { text: 'Frontend Dev · 2 skills to close', pos: 'top-10 left-2 sm:left-8 md:left-16' },
-    { text: 'Data Analyst · Ready to apply ✓', pos: 'top-16 right-2 sm:right-8 md:right-16' },
-    { text: 'Suggested: AWS Cloud Practitioner', pos: 'bottom-24 left-0 sm:left-4 md:left-8' },
-    { text: 'Missing: SQL, Docker', pos: 'bottom-16 right-0 sm:right-4 md:right-8' },
-  ]
+  let rowEls = []
 
   onMount(() => {
-    const tl = gsap.timeline({ repeat: -1, repeatDelay: 1.1 })
+    gsap.from(windowEl, { opacity: 0, y: 28, duration: 0.7, ease: 'power2.out', delay: 0.15 })
 
-    tl.set(scanEl, { y: -8, opacity: 0 })
-      .set(tagEls, { opacity: 0, y: 6 })
+    const tl = gsap.timeline({ repeat: -1, repeatDelay: 1.4, delay: 0.6 })
+    tl.set(scanEl, { y: -6, opacity: 0 })
+      .set(rowEls, { opacity: 0.35 })
       .to(scanEl, { opacity: 1, duration: 0.2 })
-      .to(scanEl, { y: 224, duration: 1.6, ease: 'power1.inOut' })
-      .to(tagEls[0], { opacity: 1, y: 0, duration: 0.35 }, '-=1.1')
-      .to(tagEls[1], { opacity: 1, y: 0, duration: 0.35 }, '-=0.75')
-      .to(tagEls[2], { opacity: 1, y: 0, duration: 0.35 }, '-=0.4')
+      .to(scanEl, { y: 210, duration: 1.5, ease: 'power1.inOut' })
+      .to(rowEls[0], { opacity: 1, duration: 0.3 }, '-=1.2')
+      .to(rowEls[1], { opacity: 1, duration: 0.3 }, '-=0.85')
+      .to(rowEls[2], { opacity: 1, duration: 0.3 }, '-=0.5')
       .to(scanEl, { opacity: 0, duration: 0.2 })
-      .to(tagEls, { opacity: 0, y: 6, duration: 0.3 }, '+=1')
-
-    gsap.from(cardEl, { opacity: 0, y: 24, duration: 0.7, ease: 'power2.out', delay: 0.1 })
-
-    gsap.from(floatEls, {
-      opacity: 0,
-      y: 16,
-      duration: 0.6,
-      stagger: 0.12,
-      ease: 'power2.out',
-      delay: 0.2,
-    })
-
-    floatEls.forEach((el, i) => {
-      if (!el) return
-      gsap.to(el, {
-        y: '+=10',
-        duration: 2.4 + i * 0.3,
-        repeat: -1,
-        yoyo: true,
-        ease: 'sine.inOut',
-      })
-    })
 
     return () => tl.kill()
   })
@@ -68,30 +38,32 @@
 </script>
 
 <section id="top" class="relative pt-40 pb-28 px-6 overflow-hidden">
-  <!-- floating skill-gap cards -->
-  {#each floatingCards as fc, i}
-    <div
-      bind:this={floatEls[i]}
-      class="hidden md:block absolute {fc.pos} text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm max-w-[190px]"
-      style="background: var(--ink); color: var(--paper);"
-    >
-      {fc.text}
-    </div>
-  {/each}
+  <!-- soft ambient color, not a flat white page -->
+  <div
+    class="absolute inset-x-0 top-0 h-[560px] -z-10"
+    style="background: radial-gradient(60% 60% at 50% 0%, color-mix(in srgb, var(--indigo) 10%, transparent), transparent 70%);"
+  ></div>
 
   <div class="max-w-3xl mx-auto text-center relative z-10">
+    <span
+      class="inline-block text-xs font-semibold px-3 py-1.5 rounded-full mb-5"
+      style="background: var(--indigo-tint); color: var(--indigo);"
+    >
+      Built for cybersecurity &amp; AI freshers
+    </span>
     <h1 class="font-display text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight leading-[1.02]">
       Let's get you<br />a job<span style="color: var(--indigo);">!</span>
     </h1>
     <p class="mt-6 text-lg max-w-xl mx-auto" style="color: var(--ink-soft);">
-      Upload your resume and find out exactly what's missing — then build the
-      right skills to close the gap. Free to try, no card needed.
+      Everyone chases an ATS score. We show you what's actually
+      missing — the skills, projects and certs recruiters expect — so you
+      close the real gap, not a fake one.
     </p>
 
     <div class="mt-9 flex flex-col sm:flex-row items-center justify-center gap-4">
       <button
         on:click={() => handleClick('hero_primary')}
-        class="font-display font-semibold text-base px-7 py-4 rounded-full transition-transform hover:-translate-y-0.5"
+        class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
         style="background: var(--ink); color: var(--paper);"
       >
         {user ? "You're signed in — upload coming next" : 'Get started for free'}
@@ -106,47 +78,40 @@
     </div>
   </div>
 
+  <!-- evidence window: what the actual output looks like -->
   <div class="relative flex justify-center mt-16">
     <div
-      bind:this={cardEl}
-      class="relative z-10 w-72 rounded-2xl border shadow-sm overflow-hidden bg-white"
+      bind:this={windowEl}
+      class="relative z-10 w-full max-w-md rounded-2xl border shadow-xl overflow-hidden bg-white"
       style="border-color: var(--line);"
     >
-      <div class="px-5 pt-5 pb-4 border-b" style="border-color: var(--line);">
-        <div class="h-3 w-28 rounded-full" style="background: var(--ink);"></div>
-        <div class="h-2 w-20 rounded-full mt-2" style="background: var(--line);"></div>
-      </div>
-      <div class="px-5 py-5 space-y-2.5">
-        <div class="h-2 rounded-full w-full" style="background: var(--line);"></div>
-        <div class="h-2 rounded-full w-11/12" style="background: var(--line);"></div>
-        <div class="h-2 rounded-full w-4/5" style="background: var(--line);"></div>
-        <div class="h-2 rounded-full w-full" style="background: var(--line);"></div>
-        <div class="h-2 rounded-full w-3/4" style="background: var(--line);"></div>
+      <div class="flex items-center gap-2 px-4 py-3 border-b" style="border-color: var(--line); background: #FAFAF9;">
+        <span class="w-2.5 h-2.5 rounded-full" style="background: var(--coral);"></span>
+        <span class="w-2.5 h-2.5 rounded-full" style="background: #F5C84C;"></span>
+        <span class="w-2.5 h-2.5 rounded-full" style="background: var(--lime);"></span>
+        <span class="ml-2 text-xs font-semibold tracking-wide" style="color: var(--ink-soft);">SKILL GAP REPORT · CYBERSECURITY</span>
       </div>
 
-      <!-- scan line -->
-      <div
-        bind:this={scanEl}
-        class="absolute left-0 right-0 h-9"
-        style="top: 84px; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--lime) 55%, transparent), transparent);"
-      ></div>
+      <div class="relative px-6 py-6 text-left">
+        <div bind:this={rowEls[0]} class="flex items-center justify-between">
+          <span class="text-sm font-semibold">Network fundamentals</span>
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--lime-tint); color: var(--ink);">Strong ✓</span>
+        </div>
+        <div bind:this={rowEls[1]} class="flex items-center justify-between mt-4">
+          <span class="text-sm font-semibold">Hands-on labs / CTFs</span>
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--coral-tint); color: var(--ink);">Missing</span>
+        </div>
+        <div bind:this={rowEls[2]} class="flex items-center justify-between mt-4">
+          <span class="text-sm font-semibold">Security certification</span>
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--coral-tint); color: var(--ink);">Missing</span>
+        </div>
 
-      <div class="px-5 pb-5 flex flex-wrap gap-2">
-        <span
-          bind:this={tagEls[0]}
-          class="text-xs font-semibold px-2.5 py-1 rounded-full"
-          style="background: color-mix(in srgb, var(--lime) 55%, white); color: var(--ink);"
-        >React ✓</span>
-        <span
-          bind:this={tagEls[1]}
-          class="text-xs font-semibold px-2.5 py-1 rounded-full"
-          style="background: color-mix(in srgb, var(--lime) 55%, white); color: var(--ink);"
-        >Git ✓</span>
-        <span
-          bind:this={tagEls[2]}
-          class="text-xs font-semibold px-2.5 py-1 rounded-full"
-          style="background: color-mix(in srgb, var(--coral) 22%, white); color: var(--ink);"
-        >Missing: SQL</span>
+        <!-- scan line -->
+        <div
+          bind:this={scanEl}
+          class="absolute left-0 right-0 h-10 pointer-events-none"
+          style="top: 24px; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--indigo) 18%, transparent), transparent);"
+        ></div>
       </div>
     </div>
   </div>

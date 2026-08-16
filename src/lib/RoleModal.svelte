@@ -1,11 +1,20 @@
 <script>
+  import { ChevronDown } from '@lucide/svelte'
   import { trackEvent } from './analytics.js'
 
   export let open = false
   export let onClose = () => {}
-  export let onSubmit = () => {} // (meta: { role, otherRole, level }) => void
+  export let onSubmit = () => {} // (meta: { role, level }) => void
 
-  const roles = ['Cybersecurity', 'AI / Machine Learning']
+  const roles = [
+    'Cybersecurity',
+    'AI / Machine Learning',
+    'Web Development',
+    'Data Science',
+    'Cloud / DevOps',
+    'Product Management',
+    'Other',
+  ]
 
   let selectedRole = ''
   let otherRole = ''
@@ -54,48 +63,49 @@
       </h2>
       <p class="mt-2 text-sm" style="color: var(--ink-soft);">
         We'll compare your resume against what this specific role actually needs.
+        <span class="block mt-1 font-medium" style="color: var(--indigo);">Deepest coverage right now: Cybersecurity &amp; AI/ML.</span>
       </p>
 
-      <div class="mt-6 space-y-2">
-        {#each roles as r}
-          <label
-            class="flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-            style="border-color: {selectedRole === r ? 'var(--indigo)' : 'var(--line)'}; background: {selectedRole === r ? 'color-mix(in srgb, var(--indigo) 6%, white)' : 'white'};"
+      <div class="mt-6">
+        <label for="role-select" class="text-sm font-semibold">Target role</label>
+        <div class="relative mt-2">
+          <select
+            id="role-select"
+            bind:value={selectedRole}
+            class="w-full appearance-none rounded-xl border px-4 py-3 text-sm font-medium bg-white outline-none transition-colors focus:border-[var(--indigo)]"
+            style="border-color: var(--line);"
           >
-            <input type="radio" name="role" value={r} bind:group={selectedRole} class="accent-[var(--indigo)]" />
-            {r}
-          </label>
-        {/each}
-        <label
-          class="flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {selectedRole === 'Other' ? 'var(--indigo)' : 'var(--line)'}; background: {selectedRole === 'Other' ? 'color-mix(in srgb, var(--indigo) 6%, white)' : 'white'};"
-        >
-          <input type="radio" name="role" value="Other" bind:group={selectedRole} class="accent-[var(--indigo)]" />
-          Other:
+            <option value="" disabled selected>Choose a role</option>
+            {#each roles as r}
+              <option value={r}>{r}</option>
+            {/each}
+          </select>
+          <ChevronDown size={16} class="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2" style="color: var(--ink-soft);" />
+        </div>
+
+        {#if selectedRole === 'Other'}
           <input
             type="text"
             placeholder="Type your target role"
             bind:value={otherRole}
-            on:click|stopPropagation
-            on:focus={() => (selectedRole = 'Other')}
-            class="flex-1 min-w-0 text-sm outline-none border-b bg-transparent"
+            class="w-full mt-3 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--indigo)]"
             style="border-color: var(--line);"
           />
-        </label>
+        {/if}
       </div>
 
       <p class="mt-6 text-sm font-semibold">Where are you at?</p>
       <div class="mt-3 grid grid-cols-2 gap-2">
         <label
           class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'fresher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'fresher' ? 'color-mix(in srgb, var(--indigo) 6%, white)' : 'white'};"
+          style="border-color: {level === 'fresher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'fresher' ? 'var(--indigo-tint)' : 'white'};"
         >
           <input type="radio" name="level" value="fresher" bind:group={level} class="hidden" />
           Fresher
         </label>
         <label
           class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'switcher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'switcher' ? 'color-mix(in srgb, var(--indigo) 6%, white)' : 'white'};"
+          style="border-color: {level === 'switcher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'switcher' ? 'var(--indigo-tint)' : 'white'};"
         >
           <input type="radio" name="level" value="switcher" bind:group={level} class="hidden" />
           Career switcher
@@ -105,7 +115,7 @@
       <button
         on:click={submit}
         disabled={!canSubmit}
-        class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-40 disabled:hover:translate-y-0"
+        class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
         style="background: var(--ink); color: var(--paper);"
       >
         Continue

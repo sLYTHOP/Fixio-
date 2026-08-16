@@ -1,4 +1,5 @@
 <script>
+  import { UploadCloud, FileText } from '@lucide/svelte'
   import { trackEvent } from './analytics.js'
 
   export let onFileReady = () => {}
@@ -6,10 +7,14 @@
   let dragOver = false
   let error = ''
   let inputEl
+  let selectedFile = null
 
   const MAX_SIZE = 8 * 1024 * 1024 // 8MB
-  const ACCEPTED = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
   const ACCEPTED_EXT = ['.pdf', '.docx']
+
+  function formatSize(bytes) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+  }
 
   function validate(file) {
     const nameOk = ACCEPTED_EXT.some(ext => file.name.toLowerCase().endsWith(ext))
@@ -26,8 +31,10 @@
       return
     }
     error = ''
+    selectedFile = file
     trackEvent('resume_upload_selected', { size: file.size, type: file.type })
-    onFileReady(file)
+    // brief confirmation beat before handing off, feels less abrupt than an instant modal swap
+    setTimeout(() => onFileReady(file), 450)
   }
 
   function onDrop(e) {
@@ -46,13 +53,15 @@
 <div
   role="button"
   tabindex="0"
-  on:click={() => inputEl.click()}
-  on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && inputEl.click()}
+  on:click={() => !selectedFile && inputEl.click()}
+  on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && !selectedFile && inputEl.click()}
   on:dragover={(e) => { e.preventDefault(); dragOver = true }}
   on:dragleave={() => (dragOver = false)}
   on:drop={onDrop}
-  class="cursor-pointer rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-colors"
-  style="border-color: {dragOver ? 'var(--indigo)' : 'var(--line)'}; background: {dragOver ? 'color-mix(in srgb, var(--indigo) 6%, white)' : 'white'};"
+  class="cursor-pointer rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-all duration-200"
+  style="border-color: {dragOver ? 'var(--indigo)' : selectedFile ? 'var(--lime)' : 'var(--line)'};
+         background: {dragOver ? 'color-mix(in srgb, var(--indigo) 6%, white)' : selectedFile ? 'var(--lime-tint)' : 'white'};
+         transform: {dragOver ? 'scale(1.01)' : 'scale(1)'};"
 >
   <input
     bind:this={inputEl}
@@ -61,8 +70,27 @@
     class="hidden"
     on:change={onInputChange}
   />
-  <p class="font-display font-semibold text-lg">Drop your resume here</p>
-  <p class="mt-1 text-sm" style="color: var(--ink-soft);">or click to browse — PDF or DOCX, up to 8MB</p>
+
+  {#if selectedFile}
+    <div class="flex items-center justify-center">
+      <div class="w-11 h-11 rounded-full flex items-center justify-center" style="background: var(--lime);">
+        <FileText size={20} color="var(--ink)" />
+      </div>
+    </div>
+    <p class="font-display font-semibold text-lg mt-3">{selectedFile.name}</p>
+    <p class="mt-1 text-sm" style="color: var(--ink-soft);">{formatSize(selectedFile.size)} · looking good</p>
+  {:else}
+    <div class="flex items-center justify-center">
+      <div
+        class="w-11 h-11 rounded-full flex items-center justify-center transition-transform"
+        style="background: var(--indigo-tint); transform: {dragOver ? 'translateY(-3px)' : 'translateY(0)'};"
+      >
+        <UploadCloud size={20} color="var(--indigo)" />
+      </div>
+    </div>
+    <p class="font-display font-semibold text-lg mt-3">Drop your resume here</p>
+    <p class="mt-1 text-sm" style="color: var(--ink-soft);">or click to browse — PDF or DOCX, up to 8MB</p>
+  {/if}
 
   {#if error}
     <p class="mt-4 text-sm font-medium" style="color: var(--coral);">{error}</p>

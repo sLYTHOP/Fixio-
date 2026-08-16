@@ -1,4 +1,5 @@
 <script>
+  import { reveal } from './reveal.js'
   export let onGetStarted = () => {}
 
   // Placeholder tiers — swap in real pricing whenever it's decided.
@@ -35,14 +36,15 @@
 
 <section id="pricing" class="py-24 px-6 border-t" style="border-color: var(--line);">
   <div class="max-w-6xl mx-auto">
-    <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight max-w-lg">
+    <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight max-w-lg" use:reveal>
       Start free. Upgrade when you're serious.
     </h2>
 
     <div class="mt-14 grid md:grid-cols-2 gap-6 max-w-3xl">
-      {#each tiers as tier}
+      {#each tiers as tier, i}
         <div
-          class="rounded-2xl p-8 border flex flex-col"
+          use:reveal={{ delay: i * 100 }}
+          class="rounded-2xl p-8 border flex flex-col transition-transform hover:-translate-y-1"
           style="border-color: {tier.highlight ? 'var(--ink)' : 'var(--line)'}; background: {tier.highlight ? 'var(--ink)' : 'white'}; color: {tier.highlight ? 'var(--paper)' : 'var(--ink)'};"
         >
           <div class="font-display text-lg font-semibold">{tier.name}</div>

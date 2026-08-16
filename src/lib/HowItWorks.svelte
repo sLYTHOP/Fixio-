@@ -1,33 +1,45 @@
 <script>
+  import { reveal } from './reveal.js'
+
   const steps = [
     {
       n: '01',
-      title: 'Sign in & upload your resume',
-      body: 'Sign in with Google, drop in your resume, and sit back — no forms to fill out.',
+      title: 'Upload your resume',
+      body: 'Drop in your resume — PDF or DOCX. No forms, no sign-in required yet.',
+      tint: 'var(--indigo-tint)',
+      accent: 'var(--indigo)',
     },
     {
       n: '02',
-      title: 'We read every line',
-      body: "We go through your projects, skills and experience — the same way a hiring manager would.",
+      title: 'Tell us your target role',
+      body: 'Cybersecurity, AI/ML, or your own — so feedback is judged against what that role actually needs.',
+      tint: 'var(--lime-tint)',
+      accent: '#5a7a00',
     },
     {
       n: '03',
       title: 'See exactly what\u2019s missing',
-      body: 'Get a clear breakdown of the skills, tools and certifications standing between you and the role.',
+      body: 'A clear breakdown of the skills, projects and certifications standing between you and the role.',
+      tint: 'var(--coral-tint)',
+      accent: 'var(--coral)',
     },
   ]
 </script>
 
 <section id="how-it-works" class="py-24 px-6 border-t" style="border-color: var(--line);">
   <div class="max-w-6xl mx-auto">
-    <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight max-w-lg">
+    <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight max-w-lg" use:reveal>
       From resume to job-ready, in three steps
     </h2>
 
-    <div class="mt-14 grid md:grid-cols-3 gap-10">
-      {#each steps as step}
-        <div>
-          <div class="font-display text-sm font-semibold" style="color: var(--indigo);">{step.n}</div>
+    <div class="mt-14 grid md:grid-cols-3 gap-6">
+      {#each steps as step, i}
+        <div
+          use:reveal={{ delay: i * 100 }}
+          class="rounded-2xl p-7"
+          style="background: {step.tint};"
+        >
+          <div class="font-display text-sm font-bold" style="color: {step.accent};">{step.n}</div>
           <h3 class="font-display text-xl font-semibold mt-3">{step.title}</h3>
           <p class="mt-2 text-sm leading-relaxed" style="color: var(--ink-soft);">{step.body}</p>
         </div>
