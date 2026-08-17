@@ -14,7 +14,7 @@
       title: 'Tell us your target role',
       body: 'Cybersecurity, AI/ML, or your own — so feedback is judged against what that role actually needs.',
       tint: 'var(--lime-tint)',
-      accent: '#5a7a00',
+      accent: 'var(--lime)',
     },
     {
       n: '03',
@@ -36,8 +36,8 @@
       {#each steps as step, i}
         <div
           use:reveal={{ delay: i * 100 }}
-          class="rounded-2xl p-7"
-          style="background: {step.tint};"
+          class="rounded-2xl p-7 border"
+          style="background: {step.tint}; border-color: var(--line);"
         >
           <div class="font-display text-sm font-bold" style="color: {step.accent};">{step.n}</div>
           <h3 class="font-display text-xl font-semibold mt-3">{step.title}</h3>

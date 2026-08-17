@@ -2,16 +2,18 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #FAFAF7;
-  --ink: #14141A;
-  --ink-soft: #4A4A57;
+  --paper: #17181C;
+  --surface: #212226;
+  --surface-2: #2A2B30;
+  --ink: #F5F5F0;
+  --ink-soft: #A3A3AD;
   --lime: #CFFF3D;
-  --lime-tint: #F3FFD1;
-  --indigo: #3B2FC9;
-  --indigo-tint: #EEEBFF;
-  --coral: #FF5E4D;
-  --coral-tint: #FFEAE6;
-  --line: #E4E4DE;
+  --lime-tint: rgba(207, 255, 61, 0.14);
+  --indigo: #8C7DFF;
+  --indigo-tint: rgba(140, 125, 255, 0.16);
+  --coral: #FF6B5C;
+  --coral-tint: rgba(255, 107, 92, 0.16);
+  --line: #34353B;
 }
 
 * { box-sizing: border-box; }

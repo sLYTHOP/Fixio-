@@ -43,17 +43,18 @@
     role="presentation"
   >
     <div
-      class="bg-white rounded-2xl max-w-md w-full p-8 relative"
+      class="rounded-2xl max-w-md w-full p-8 relative"
       on:click|stopPropagation
       role="dialog"
       tabindex="-1"
       aria-modal="true"
       aria-labelledby="role-title"
+      style="background: var(--surface); color: var(--ink); border: 1px solid var(--line);"
     >
       <button
         on:click={onClose}
         aria-label="Close"
-        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--paper)]"
+        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)]"
       >
         ✕
       </button>
@@ -63,7 +64,7 @@
       </h2>
       <p class="mt-2 text-sm" style="color: var(--ink-soft);">
         We'll compare your resume against what this specific role actually needs.
-        <span class="block mt-1 font-medium" style="color: var(--indigo);">Deepest coverage right now: Cybersecurity &amp; AI/ML.</span>
+        <span class="block mt-1 font-medium" style="color: var(--lime);">Deepest coverage right now: Cybersecurity &amp; AI/ML.</span>
       </p>
 
       <div class="mt-6">
@@ -72,8 +73,8 @@
           <select
             id="role-select"
             bind:value={selectedRole}
-            class="w-full appearance-none rounded-xl border px-4 py-3 text-sm font-medium bg-white outline-none transition-colors focus:border-[var(--indigo)]"
-            style="border-color: var(--line);"
+            class="w-full appearance-none rounded-xl border px-4 py-3 text-sm font-medium outline-none transition-colors focus:border-[var(--lime)]"
+            style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
           >
             <option value="" disabled selected>Choose a role</option>
             {#each roles as r}
@@ -88,8 +89,8 @@
             type="text"
             placeholder="Type your target role"
             bind:value={otherRole}
-            class="w-full mt-3 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--indigo)]"
-            style="border-color: var(--line);"
+            class="w-full mt-3 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
+            style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
           />
         {/if}
       </div>
@@ -98,14 +99,14 @@
       <div class="mt-3 grid grid-cols-2 gap-2">
         <label
           class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'fresher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'fresher' ? 'var(--indigo-tint)' : 'white'};"
+          style="border-color: {level === 'fresher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'fresher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
         >
           <input type="radio" name="level" value="fresher" bind:group={level} class="hidden" />
           Fresher
         </label>
         <label
           class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'switcher' ? 'var(--indigo)' : 'var(--line)'}; background: {level === 'switcher' ? 'var(--indigo-tint)' : 'white'};"
+          style="border-color: {level === 'switcher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'switcher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
         >
           <input type="radio" name="level" value="switcher" bind:group={level} class="hidden" />
           Career switcher
@@ -116,7 +117,7 @@
         on:click={submit}
         disabled={!canSubmit}
         class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-        style="background: var(--ink); color: var(--paper);"
+        style="background: var(--lime); color: var(--paper);"
       >
         Continue
       </button>

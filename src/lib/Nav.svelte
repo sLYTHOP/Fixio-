@@ -26,8 +26,8 @@
         <span class="text-sm font-medium hidden sm:inline">{firstName}</span>
         <button
           on:click={onSignOut}
-          class="text-sm font-semibold px-4 py-2 rounded-full border transition-colors hover:bg-[var(--ink)] hover:text-[var(--paper)]"
-          style="border-color: var(--ink);"
+          class="text-sm font-semibold px-4 py-2 rounded-full border transition-colors hover:bg-[var(--surface-2)]"
+          style="border-color: var(--line);"
         >
           Sign out
         </button>
@@ -35,8 +35,8 @@
     {:else}
       <button
         on:click={onSignIn}
-        class="text-sm font-semibold px-4 py-2 rounded-full border transition-colors hover:bg-[var(--ink)] hover:text-[var(--paper)]"
-        style="border-color: var(--ink);"
+        class="text-sm font-semibold px-4 py-2 rounded-full transition-transform hover:-translate-y-0.5"
+        style="background: var(--lime); color: var(--paper);"
       >
         Sign in
       </button>

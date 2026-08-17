@@ -20,17 +20,18 @@
     role="presentation"
   >
     <div
-      class="bg-white rounded-2xl max-w-md w-full p-8 relative"
+      class="rounded-2xl max-w-md w-full p-8 relative"
       on:click|stopPropagation
       role="dialog"
       tabindex="-1"
       aria-modal="true"
       aria-labelledby="upload-title"
+      style="background: var(--surface); color: var(--ink); border: 1px solid var(--line);"
     >
       <button
         on:click={onClose}
         aria-label="Close"
-        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--paper)]"
+        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)]"
       >
         ✕
       </button>

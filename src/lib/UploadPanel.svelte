@@ -59,9 +59,10 @@
   on:dragleave={() => (dragOver = false)}
   on:drop={onDrop}
   class="cursor-pointer rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-all duration-200"
-  style="border-color: {dragOver ? 'var(--indigo)' : selectedFile ? 'var(--lime)' : 'var(--line)'};
-         background: {dragOver ? 'color-mix(in srgb, var(--indigo) 6%, white)' : selectedFile ? 'var(--lime-tint)' : 'white'};
-         transform: {dragOver ? 'scale(1.01)' : 'scale(1)'};"
+  style="border-color: {dragOver ? 'var(--lime)' : selectedFile ? 'var(--lime)' : 'var(--line)'};
+         background: {dragOver ? 'var(--lime-tint)' : selectedFile ? 'var(--lime-tint)' : 'var(--surface-2)'};
+         transform: {dragOver ? 'scale(1.01)' : 'scale(1)'};
+         color: var(--ink);"
 >
   <input
     bind:this={inputEl}
@@ -74,7 +75,7 @@
   {#if selectedFile}
     <div class="flex items-center justify-center">
       <div class="w-11 h-11 rounded-full flex items-center justify-center" style="background: var(--lime);">
-        <FileText size={20} color="var(--ink)" />
+        <FileText size={20} color="var(--paper)" />
       </div>
     </div>
     <p class="font-display font-semibold text-lg mt-3">{selectedFile.name}</p>
@@ -83,9 +84,9 @@
     <div class="flex items-center justify-center">
       <div
         class="w-11 h-11 rounded-full flex items-center justify-center transition-transform"
-        style="background: var(--indigo-tint); transform: {dragOver ? 'translateY(-3px)' : 'translateY(0)'};"
+        style="background: var(--lime-tint); transform: {dragOver ? 'translateY(-3px)' : 'translateY(0)'};"
       >
-        <UploadCloud size={20} color="var(--indigo)" />
+        <UploadCloud size={20} color="var(--lime)" />
       </div>
     </div>
     <p class="font-display font-semibold text-lg mt-3">Drop your resume here</p>

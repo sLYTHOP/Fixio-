@@ -75,7 +75,7 @@
         {#each phrases as _, i}
           <span
             class="w-2 h-2 rounded-full transition-colors"
-            style="background: {i === phraseIndex ? 'var(--indigo)' : 'var(--line)'};"
+            style="background: {i === phraseIndex ? 'var(--lime)' : 'var(--line)'};"
           ></span>
         {/each}
       </div>
@@ -88,11 +88,11 @@
         This is a preview layout — real AI-generated feedback is coming soon.
       </p>
 
-      <div class="mt-8 text-left rounded-2xl border p-6" style="border-color: var(--line);">
+      <div class="mt-8 text-left rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
         <p class="font-display font-semibold">Your experience looks solid on:</p>
         <div class="mt-3 flex flex-wrap gap-2">
           {#each mockFeedback.strengths as s}
-            <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: color-mix(in srgb, var(--lime) 55%, white);">{s}</span>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--lime-tint); color: var(--lime);">{s}</span>
           {/each}
         </div>
 
@@ -118,7 +118,7 @@
           on:click={() => { waitlistClicked = true; trackEvent('roadmap_interest_clicked', { role: roleMeta?.role }) }}
           disabled={waitlistClicked}
           class="mt-4 font-display font-semibold text-sm px-6 py-3 rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-60"
-          style="background: var(--lime); color: var(--ink);"
+          style="background: var(--lime); color: var(--paper);"
         >
           {waitlistClicked ? "You're on the list!" : 'Join the waitlist'}
         </button>

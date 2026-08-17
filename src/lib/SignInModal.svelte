@@ -36,17 +36,18 @@
     role="presentation"
   >
     <div
-      class="bg-white rounded-2xl max-w-sm w-full p-8 relative"
+      class="rounded-2xl max-w-sm w-full p-8 relative"
       on:click|stopPropagation
       role="dialog"
       tabindex="-1"
       aria-modal="true"
       aria-labelledby="signin-title"
+      style="background: var(--surface); color: var(--ink); border: 1px solid var(--line);"
     >
       <button
         on:click={onClose}
         aria-label="Close"
-        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--paper)]"
+        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)]"
       >
         ✕
       </button>
@@ -55,13 +56,13 @@
         One step away
       </h2>
       <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-        Sign up with Google to upload your resume and get your feedback.
+        Sign in with Google to see your feedback.
       </p>
 
       <button
         on:click={handleGoogle}
         disabled={loading}
-        class="mt-6 w-full flex items-center justify-center gap-3 font-semibold text-sm px-6 py-3.5 rounded-full border transition-colors hover:bg-[var(--paper)] disabled:opacity-60"
+        class="mt-6 w-full flex items-center justify-center gap-3 font-semibold text-sm px-6 py-3.5 rounded-full border transition-colors hover:bg-[var(--surface-2)] disabled:opacity-60"
         style="border-color: var(--line);"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">

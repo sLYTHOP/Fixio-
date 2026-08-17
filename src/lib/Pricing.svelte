@@ -45,7 +45,7 @@
         <div
           use:reveal={{ delay: i * 100 }}
           class="rounded-2xl p-8 border flex flex-col transition-transform hover:-translate-y-1"
-          style="border-color: {tier.highlight ? 'var(--ink)' : 'var(--line)'}; background: {tier.highlight ? 'var(--ink)' : 'white'}; color: {tier.highlight ? 'var(--paper)' : 'var(--ink)'};"
+          style="border-color: {tier.highlight ? 'var(--lime)' : 'var(--line)'}; background: {tier.highlight ? 'var(--ink)' : 'var(--surface)'}; color: {tier.highlight ? 'var(--paper)' : 'var(--ink)'};"
         >
           <div class="font-display text-lg font-semibold">{tier.name}</div>
           <div class="mt-4 flex items-baseline gap-1">
