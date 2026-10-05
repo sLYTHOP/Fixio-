@@ -19,7 +19,7 @@
     {
       n: '03',
       title: 'See exactly what\u2019s missing',
-      body: 'A clear breakdown of the skills, projects and certifications standing between you and the role.',
+      body: 'We match your resume against a knowledge base built from handpicked real job descriptions for your role, then recommend specific fixes — skills, projects and certifications standing between you and the job.',
       tint: 'var(--coral-tint)',
       accent: 'var(--coral)',
     },

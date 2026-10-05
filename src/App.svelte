@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import Nav from './lib/Nav.svelte'
   import Hero from './lib/Hero.svelte'
+  import WhyFixio from './lib/WhyFixio.svelte'
   import HowItWorks from './lib/HowItWorks.svelte'
   import Pricing from './lib/Pricing.svelte'
   import Footer from './lib/Footer.svelte'
@@ -73,6 +74,7 @@
   <main>
     <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
     <Hero {user} onGetStarted={openUploadFlow} />
+    <WhyFixio />
     <HowItWorks />
     <Pricing onGetStarted={openUploadFlow} />
     <Footer />

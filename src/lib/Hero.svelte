@@ -46,12 +46,6 @@
 
   <div class="max-w-6xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
     <div class="text-center lg:text-left">
-      <span
-        class="inline-block text-xs font-semibold px-3 py-1.5 rounded-full mb-5"
-        style="background: var(--lime-tint); color: var(--lime);"
-      >
-        Built for cybersecurity &amp; AI freshers
-      </span>
       <h1 class="font-display text-5xl sm:text-6xl font-extrabold tracking-tight leading-[1.02]">
         Let's get you<br />a job<span style="color: var(--lime);">!</span>
       </h1>

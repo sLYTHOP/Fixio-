@@ -18,6 +18,8 @@
 
 * { box-sizing: border-box; }
 
+p { text-align: justify; text-align-last: left; }
+
 html {
   scroll-behavior: smooth;
 }
