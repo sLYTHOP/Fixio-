@@ -15,10 +15,10 @@
     </h2>
     <p class="mt-5 text-lg" style="color: var(--ink-soft);">
       Most tools stop at formatting and keyword matching — they'll tell you your
-      resume "passes" a scanner, but not whether you're actually ready for the
-      role. Before writing a line of code, we talked to real freshers about why
-      they weren't landing interviews. The honest answer almost never was
-      formatting — it was missing skills, thin projects, and gaps nobody had
+      resume "passes" an ATS scanner, but not whether you're actually ready for the
+      role you are applying for. Before even writing a line of code, we talked with freshers about why
+      they weren't landing interviews even after having good ATS scores. The honest answer almost never was
+      formatting — it was missing the skills, projects, and gaps which nobody had
       pointed out to them clearly. That's the problem we built Fixio to solve.
     </p>
   </div>
