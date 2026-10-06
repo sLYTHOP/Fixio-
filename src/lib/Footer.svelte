@@ -20,12 +20,19 @@
 </script>
 
 <footer class="py-12 px-6 border-t" style="border-color: var(--line);">
-  <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
-    <div class="font-display font-semibold flex items-center gap-2">
-      <span class="inline-block w-2.5 h-2.5 rounded-full" style="background: var(--lime);"></span>
+  <div class="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-3 items-center gap-6">
+    <div class="font-display font-semibold flex items-center gap-2 justify-center sm:justify-start">
+      <svg width="20" height="20" viewBox="0 0 400 400" fill="none">
+        <path d="M120 110 L92 110 Q80 110 80 122 L80 278 Q80 290 92 290 L120 290" stroke="var(--lime)" stroke-width="22" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M280 110 L308 110 Q320 110 320 122 L320 278 Q320 290 308 290 L280 290" stroke="var(--lime)" stroke-width="22" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M152 205 L188 240 L252 165" stroke="var(--lime)" stroke-width="24" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
       Fixio
     </div>
-    <div class="flex items-center gap-4">
+
+    <p class="text-sm text-center order-last sm:order-none" style="color: var(--ink-soft);">© {year} Fixio. All rights reserved.</p>
+
+    <div class="flex items-center gap-4 justify-center sm:justify-end">
       {#each socials as s}
         <a
           href={s.href}
@@ -41,6 +48,5 @@
         </a>
       {/each}
     </div>
-    <p class="text-sm" style="color: var(--ink-soft);">© {year} Fixio. All rights reserved.</p>
   </div>
 </footer>

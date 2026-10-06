@@ -42,7 +42,7 @@
         class="text-sm font-semibold px-4 py-2 rounded-full transition-transform hover:-translate-y-0.5"
         style="background: var(--lime); color: var(--paper);"
       >
-        Sign in
+        Log in
       </button>
     {/if}
   </nav>

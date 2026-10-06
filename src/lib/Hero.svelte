@@ -50,9 +50,8 @@
         Let's get you<br />a job<span style="color: var(--lime);">!</span>
       </h1>
       <p class="mt-6 text-lg max-w-md mx-auto lg:mx-0" style="color: var(--ink-soft);">
-        Everyone chases an ATS score. We show you what's actually
-        missing — the skills, projects and certs recruiters expect — so you
-        close the real gap, not a fake one.
+        Everyone chases an ATS score. We show you what's actually missing:
+        the skills, projects and certs recruiters expect, so you close real gaps.
       </p>
 
       <div class="mt-9 flex flex-col sm:flex-row items-center lg:items-start justify-center lg:justify-start gap-4">
@@ -61,7 +60,7 @@
           class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
           style="background: var(--lime); color: var(--paper);"
         >
-          {user ? "You're signed in — upload coming next" : 'Get started for free'}
+          {user ? "You're signed in — upload coming next" : 'Upload resume'}
         </button>
         <button
           on:click={scrollToHowItWorks}

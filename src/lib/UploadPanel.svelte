@@ -1,13 +1,21 @@
 <script>
+  import { onMount } from 'svelte'
   import { UploadCloud, FileText } from '@lucide/svelte'
   import { trackEvent } from './analytics.js'
 
   export let onFileReady = () => {}
+  export let autoOpen = true
 
   let dragOver = false
   let error = ''
   let inputEl
   let selectedFile = null
+
+  onMount(() => {
+    // Skip the extra click: open the native file picker immediately.
+    // If the person cancels it, the dropzone below is still there as a fallback.
+    if (autoOpen) setTimeout(() => inputEl?.click(), 50)
+  })
 
   const MAX_SIZE = 8 * 1024 * 1024 // 8MB
   const ACCEPTED_EXT = ['.pdf', '.docx']
