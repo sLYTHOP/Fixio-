@@ -1,16 +1,14 @@
 import posthog from 'posthog-js'
 
-// TODO: replace with your real PostHog project key + host before deploying.
-// Get these from your PostHog project settings: https://app.posthog.com/project/settings
-const POSTHOG_KEY = 'phc_REPLACE_ME'
-const POSTHOG_HOST = 'https://us.i.posthog.com'
+const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY
+const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com'
 
 let initialized = false
 
 export function initAnalytics() {
   if (initialized || typeof window === 'undefined') return
-  if (POSTHOG_KEY === 'phc_REPLACE_ME') {
-    console.warn('[analytics] PostHog key not set yet — skipping init. Add your key in src/lib/analytics.js')
+  if (!POSTHOG_KEY) {
+    console.warn('[analytics] VITE_POSTHOG_KEY not set — skipping init. Add it to .env (local) and Vercel env vars (live).')
     return
   }
   posthog.init(POSTHOG_KEY, {
