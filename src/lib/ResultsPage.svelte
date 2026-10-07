@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { uploadResume } from './supabase.js'
+  import { uploadResume, supabase } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
 
@@ -10,6 +10,7 @@
   let uploadError = ''
   let roleMeta = null
   let waitlistClicked = false
+  let feedback = null // real result from analyze-resume: { strengths, gaps, suggestions, vagueBullets }
 
   const phrases = [
     "Alright, let's see what we've got here...",
@@ -22,11 +23,13 @@
 
   const firstName = (user?.user_metadata?.full_name || user?.email || '').split(' ')[0]
 
-  // Placeholder feedback until the real analysis (LLM) is wired up.
-  const mockFeedback = {
-    strengths: ['React ✓', 'Git ✓', 'Team project experience ✓'],
-    gaps: ['SQL — most roles expect at least basic querying', 'No cloud platform experience (AWS/GCP/Azure)'],
-    suggestions: ['AWS Cloud Practitioner (free learning path)', 'A small project using SQL + a public dataset'],
+  const errorMessages = {
+    no_knowledge_base: "We don't have validated feedback for this role yet.",
+    file_not_found: "We couldn't find your uploaded resume. Please try again.",
+    unsupported_file_type: 'Right now we can only analyze PDF resumes — DOCX support is coming soon.',
+    llm_error: 'Something went wrong generating your feedback. Please try again in a moment.',
+    parse_error: 'Something went wrong reading your feedback. Please try again.',
+    unexpected_error: 'Something unexpected went wrong. Please try again.',
   }
 
   onMount(async () => {
@@ -38,13 +41,13 @@
       return
     }
 
-    const { error } = await uploadResume(user.id, file)
+    const { data: uploadData, error: uploadErr } = await uploadResume(user.id, file)
     clearPendingResume()
 
-    if (error) {
+    if (uploadErr || !uploadData?.path) {
       stage = 'error'
       uploadError = 'Upload failed. Please try again.'
-      console.error(error)
+      console.error(uploadErr)
       return
     }
 
@@ -54,11 +57,23 @@
       phraseIndex = (phraseIndex + 1) % phrases.length
     }, 1400)
 
-    setTimeout(() => {
-      clearInterval(phraseTimer)
-      stage = 'done'
-      trackEvent('feedback_shown_mock')
-    }, phrases.length * 1400)
+    const { data, error: fnError } = await supabase.functions.invoke('analyze-resume', {
+      body: { role: roleMeta?.role, level: roleMeta?.level, resumePath: uploadData.path },
+    })
+
+    clearInterval(phraseTimer)
+
+    if (fnError || !data?.ok) {
+      stage = 'error'
+      uploadError = errorMessages[data?.reason] || 'Something went wrong. Please try again.'
+      console.error(fnError || data)
+      trackEvent('feedback_failed', { reason: data?.reason || 'invoke_error' })
+      return
+    }
+
+    feedback = data.result
+    stage = 'done'
+    trackEvent('feedback_shown', { role: roleMeta?.role })
   })
 
   onDestroy(() => clearInterval(phraseTimer))
@@ -93,33 +108,42 @@
       <h1 class="font-display text-3xl font-bold tracking-tight">
         Alright {firstName}, here's how you match up{roleMeta?.role ? ` for ${roleMeta.role}` : ''}
       </h1>
-      <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-        This is a preview layout — real AI-generated feedback is coming soon.
-      </p>
 
       <div class="mt-8 grid lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 space-y-6">
           <div class="text-left rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
             <p class="font-display font-semibold">Your experience looks solid on:</p>
             <div class="mt-3 flex flex-wrap gap-2">
-              {#each mockFeedback.strengths as s}
+              {#each feedback.strengths as s}
                 <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--lime-tint); color: var(--lime);">{s}</span>
               {/each}
             </div>
 
             <p class="font-display font-semibold mt-6">Here's what's missing:</p>
             <ul class="mt-3 space-y-2 text-sm" style="color: var(--ink-soft);">
-              {#each mockFeedback.gaps as g}
+              {#each feedback.gaps as g}
                 <li>• {g}</li>
               {/each}
             </ul>
 
             <p class="font-display font-semibold mt-6">Worth looking into:</p>
             <ul class="mt-3 space-y-2 text-sm" style="color: var(--ink-soft);">
-              {#each mockFeedback.suggestions as s}
+              {#each feedback.suggestions as s}
                 <li>• {s}</li>
               {/each}
             </ul>
+
+            {#if feedback.vagueBullets?.length}
+              <p class="font-display font-semibold mt-6">Worth sharpening:</p>
+              <div class="mt-3 space-y-3">
+                {#each feedback.vagueBullets as vb}
+                  <div class="text-sm rounded-xl p-3" style="background: var(--coral-tint);">
+                    <p style="color: var(--ink-soft);">"{vb.original}"</p>
+                    <p class="mt-1" style="color: var(--coral);">→ {vb.suggestion}</p>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
 
           <div class="rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
@@ -156,11 +180,11 @@
 
             <div class="mt-5 pt-5 border-t flex gap-4" style="border-color: var(--line);">
               <div>
-                <p class="font-display text-2xl font-bold" style="color: var(--lime);">{mockFeedback.strengths.length}</p>
+                <p class="font-display text-2xl font-bold" style="color: var(--lime);">{feedback.strengths.length}</p>
                 <p class="text-xs" style="color: var(--ink-soft);">strengths found</p>
               </div>
               <div>
-                <p class="font-display text-2xl font-bold" style="color: var(--coral);">{mockFeedback.gaps.length}</p>
+                <p class="font-display text-2xl font-bold" style="color: var(--coral);">{feedback.gaps.length}</p>
                 <p class="text-xs" style="color: var(--ink-soft);">gaps found</p>
               </div>
             </div>
