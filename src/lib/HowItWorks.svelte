@@ -12,14 +12,14 @@
     {
       n: '02',
       title: 'Tell us your target role',
-      body: 'Cybersecurity, AI/ML, or your own — so feedback is judged against what that role actually needs.',
+      body: 'Data Scientist, AI/ML, or your own — so feedback is judged against what that role actually needs.',
       tint: 'var(--lime-tint)',
       accent: 'var(--lime)',
     },
     {
       n: '03',
       title: 'See exactly what\u2019s missing',
-      body: 'We match your resume against a knowledge base built from handpicked real job descriptions for your role, then recommend specific fixes — skills, projects and certifications standing between you and the job.',
+      body: 'We match your resume against our knowledge base built from handpicked real job descriptions for your role, then recommend specific fixes — skills, projects and certifications standing between you and the job.',
       tint: 'var(--coral-tint)',
       accent: 'var(--coral)',
     },
