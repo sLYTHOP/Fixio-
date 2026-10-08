@@ -30,6 +30,9 @@
     llm_error: 'Something went wrong generating your feedback. Please try again in a moment.',
     parse_error: 'Something went wrong reading your feedback. Please try again.',
     unexpected_error: 'Something unexpected went wrong. Please try again.',
+    unauthorized: 'Please log in again and retry.',
+    forbidden: 'Something went wrong with your upload. Please try again.',
+    rate_limited: "You've hit today's limit of resume scans. Please come back tomorrow.",
   }
 
   onMount(async () => {

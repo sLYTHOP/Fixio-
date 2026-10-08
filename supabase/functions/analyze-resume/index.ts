@@ -7,6 +7,7 @@ import { createClient } from "npm:@supabase/supabase-js@2"
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const DAILY_LIMIT = 5 // analyses per user per 24h — protects your Claude credit
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
@@ -34,6 +35,24 @@ Deno.serve(async (req) => {
     if (!role || !resumePath) return json({ ok: false, reason: "bad_request" }, 400)
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+    // 0. Require a logged-in user. The public anon key alone must not trigger paid calls.
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") ?? ""
+    const { data: userData } = await supabase.auth.getUser(token)
+    const authedUser = userData?.user
+    if (!authedUser) return json({ ok: false, reason: "unauthorized" }, 401)
+
+    // Users may only analyze files inside their own storage folder.
+    if (!resumePath.startsWith(`${authedUser.id}/`)) return json({ ok: false, reason: "forbidden" }, 403)
+
+    // Per-user daily cap.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const { count } = await supabase
+      .from("feedback")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", authedUser.id)
+      .gte("created_at", since)
+    if ((count ?? 0) >= DAILY_LIMIT) return json({ ok: false, reason: "rate_limited" })
 
     // 1. Look up the knowledge base entry for this role
     const roleKey = slugify(role)
@@ -128,11 +147,8 @@ Instructions:
     }
 
     // 4. Save to feedback table (best-effort — don't fail the request if this fails)
-    const authHeader = req.headers.get("Authorization")?.replace("Bearer ", "") ?? ""
-    const { data: userData } = await supabase.auth.getUser(authHeader)
-
     await supabase.from("feedback").insert({
-      user_id: userData?.user?.id ?? null,
+      user_id: authedUser.id,
       role,
       level,
       resume_path: resumePath,
