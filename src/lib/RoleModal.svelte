@@ -4,9 +4,11 @@
 
   export let open = false
   export let onClose = () => {}
-  export let onSubmit = () => {} // (meta: { role, level }) => void
+  /** @type {(meta: { role: string, level: string }) => void} */
+  export let onSubmit = () => {}
 
   let waitlisted = false
+  let step = 1
 
   const roles = [
     'Cybersecurity',
@@ -34,13 +36,36 @@
 
   $: needsSubRole = selectedRole === 'Cybersecurity'
   $: subRoleIsReady = !needsSubRole || cyberSubRoles.find(s => s.label === subRole)?.ready
-  $: canSubmit =
+  $: canContinue =
     (selectedRole === 'Other' ? otherRole.trim().length > 0 : !!selectedRole) &&
-    (!needsSubRole || !!subRole) &&
-    !!level
+    (!needsSubRole || !!subRole)
+  $: canSubmit = !!level
 
+  /** @param {KeyboardEvent} e */
   function handleKeydown(e) {
-    if (e.key === 'Escape') onClose()
+    if (e.key === 'Escape') close()
+  }
+
+  /** @param {KeyboardEvent} e */
+  function handleDialogKeydown(e) {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      close()
+    }
+  }
+
+  function close() {
+    step = 1
+    waitlisted = false
+    onClose()
+  }
+
+  function continueToExperience() {
+    if (canContinue) step = 2
+  }
+
+  function goBack() {
+    step = 1
   }
 
   function submit() {
@@ -61,14 +86,15 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center px-6"
+    class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-4 sm:items-center sm:px-6 sm:py-6"
     style="background: color-mix(in srgb, var(--ink) 45%, transparent);"
-    on:click={onClose}
+    on:click={close}
     role="presentation"
   >
     <div
-      class="rounded-2xl max-w-md w-full p-8 relative"
+      class="relative my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 sm:max-h-[calc(100dvh-3rem)] sm:p-8"
       on:click|stopPropagation
+      on:keydown={handleDialogKeydown}
       role="dialog"
       tabindex="-1"
       aria-modal="true"
@@ -76,7 +102,7 @@
       style="background: var(--surface); color: var(--ink); border: 1px solid var(--line);"
     >
       <button
-        on:click={onClose}
+        on:click={close}
         aria-label="Close"
         class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)]"
       >
@@ -89,96 +115,122 @@
           We don't have a validated skill-gap model for this track yet — we'll email you the moment we do.
         </p>
         <button
-          on:click={onClose}
+          on:click={close}
           class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5"
           style="background: var(--lime); color: var(--paper);"
         >
           Got it
         </button>
       {:else}
-      <h2 id="role-title" class="font-display text-2xl font-bold tracking-tight">
-        What role are you aiming for?
-      </h2>
-      <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-        We'll compare your resume against what this specific role actually needs.
-      </p>
-
-      <div class="mt-6">
-        <label for="role-select" class="text-sm font-semibold">Target role</label>
-        <div class="relative mt-2">
-          <select
-            id="role-select"
-            bind:value={selectedRole}
-            on:change={() => (subRole = '')}
-            class="w-full appearance-none rounded-xl border px-4 py-3 text-sm font-medium outline-none transition-colors focus:border-[var(--lime)]"
-            style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
-          >
-            <option value="" disabled selected>Choose a role</option>
-            {#each roles as r}
-              <option value={r}>{r}</option>
-            {/each}
-          </select>
-          <ChevronDown size={16} class="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2" style="color: var(--ink-soft);" />
+        <div class="mb-6 pr-10">
+          <p class="mb-2 text-xs font-semibold uppercase tracking-wider" style="color: var(--ink-soft);">
+            Question {step} of 2
+          </p>
+          <div class="mb-4 flex gap-2" aria-hidden="true">
+            <span class="h-1.5 flex-1 rounded-full" style="background: var(--lime);"></span>
+            <span class="h-1.5 flex-1 rounded-full" style="background: {step === 2 ? 'var(--lime)' : 'var(--line)'};"></span>
+          </div>
+          <h2 id="role-title" class="font-display text-2xl font-bold tracking-tight">
+            {step === 1 ? 'What role are you aiming for?' : 'Where are you at?'}
+          </h2>
         </div>
 
-        {#if selectedRole === 'Other'}
-          <input
-            type="text"
-            placeholder="Type your target role"
-            bind:value={otherRole}
-            class="w-full mt-3 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
-            style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
-          />
-        {/if}
+        {#if step === 1}
+          <label for="role-select" class="text-sm font-semibold">Target role</label>
+          <div class="relative mt-2">
+            <select
+              id="role-select"
+              bind:value={selectedRole}
+              on:change={() => (subRole = '')}
+              class="w-full appearance-none rounded-xl border px-4 py-3 text-sm font-medium outline-none transition-colors focus:border-[var(--lime)]"
+              style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
+            >
+              <option value="" disabled selected>Choose a role</option>
+              {#each roles as r}
+                <option value={r}>{r}</option>
+              {/each}
+            </select>
+            <ChevronDown size={16} class="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2" style="color: var(--ink-soft);" />
+          </div>
 
-        {#if needsSubRole}
-          <p class="text-sm font-semibold mt-4">Which part of cybersecurity?</p>
-          <div class="mt-2 grid grid-cols-2 gap-2">
-            {#each cyberSubRoles as s}
-              <button
-                type="button"
-                on:click={() => (subRole = s.label)}
-                class="text-left rounded-xl border px-3 py-2.5 text-xs font-medium transition-colors relative"
-                style="border-color: {subRole === s.label ? 'var(--lime)' : 'var(--line)'};
-                       background: {subRole === s.label ? 'var(--lime-tint)' : 'var(--surface-2)'};
-                       color: {s.ready ? 'var(--ink)' : 'var(--ink-soft)'};"
-              >
-                {s.label}
-                {#if !s.ready}
-                  <span class="block mt-0.5 text-[10px]" style="color: var(--coral);">Coming soon</span>
-                {/if}
-              </button>
-            {/each}
+          {#if selectedRole === 'Other'}
+            <input
+              type="text"
+              placeholder="Type your target role"
+              bind:value={otherRole}
+              class="mt-3 w-full rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
+              style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
+            />
+          {/if}
+
+          {#if needsSubRole}
+            <p class="mt-4 text-sm font-semibold">Which part of cybersecurity?</p>
+            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {#each cyberSubRoles as s}
+                <button
+                  type="button"
+                  on:click={() => (subRole = s.label)}
+                  class="relative rounded-xl border px-3 py-3 text-left text-sm font-medium transition-colors"
+                  style="border-color: {subRole === s.label ? 'var(--lime)' : 'var(--line)'};
+                         background: {subRole === s.label ? 'var(--lime-tint)' : 'var(--surface-2)'};
+                         color: {s.ready ? 'var(--ink)' : 'var(--ink-soft)'};"
+                >
+                  {s.label}
+                  {#if !s.ready}
+                    <span class="mt-0.5 block text-xs" style="color: var(--coral);">Coming soon</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <button
+            type="button"
+            on:click={continueToExperience}
+            disabled={!canContinue}
+            class="mt-7 w-full rounded-full px-6 py-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+            style="background: var(--lime); color: var(--paper);"
+          >
+            Continue
+          </button>
+        {:else}
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label
+              class="cursor-pointer rounded-xl border px-4 py-4 text-center text-sm font-medium transition-colors"
+              style="border-color: {level === 'fresher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'fresher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
+            >
+              <input type="radio" name="level" value="fresher" bind:group={level} class="sr-only" />
+              Fresher
+            </label>
+            <label
+              class="cursor-pointer rounded-xl border px-4 py-4 text-center text-sm font-medium transition-colors"
+              style="border-color: {level === 'switcher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'switcher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
+            >
+              <input type="radio" name="level" value="switcher" bind:group={level} class="sr-only" />
+              Career switcher
+            </label>
+          </div>
+
+          <div class="mt-7 flex flex-col-reverse gap-3 sm:flex-row">
+            <button
+              type="button"
+              on:click={goBack}
+              class="w-full rounded-full border px-6 py-3.5 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)] sm:w-auto sm:flex-1"
+              style="border-color: var(--line); color: var(--ink);"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              on:click={submit}
+              disabled={!canSubmit}
+              class="w-full rounded-full px-6 py-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:flex-1"
+              style="background: var(--lime); color: var(--paper);"
+            >
+              {needsSubRole && subRole && !subRoleIsReady ? 'Join the waitlist instead' : 'Continue'}
+            </button>
           </div>
         {/if}
-      </div>
-
-      <p class="mt-6 text-sm font-semibold">Where are you at?</p>
-      <div class="mt-3 grid grid-cols-2 gap-2">
-        <label
-          class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'fresher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'fresher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
-        >
-          <input type="radio" name="level" value="fresher" bind:group={level} class="hidden" />
-          Fresher
-        </label>
-        <label
-          class="text-center rounded-xl border px-4 py-3 cursor-pointer text-sm font-medium transition-colors"
-          style="border-color: {level === 'switcher' ? 'var(--lime)' : 'var(--line)'}; background: {level === 'switcher' ? 'var(--lime-tint)' : 'var(--surface-2)'}; color: var(--ink);"
-        >
-          <input type="radio" name="level" value="switcher" bind:group={level} class="hidden" />
-          Career switcher
-        </label>
-      </div>
-
-      <button
-        on:click={submit}
-        disabled={!canSubmit}
-        class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
-        style="background: var(--lime); color: var(--paper);"
-      >
-        {needsSubRole && subRole && !subRoleIsReady ? 'Join the waitlist instead' : 'Continue'}
-      </button>
       {/if}
     </div>
   </div>
