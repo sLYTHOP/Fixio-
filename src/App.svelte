@@ -7,7 +7,7 @@
   import Pricing from './lib/Pricing.svelte'
   import Footer from './lib/Footer.svelte'
   import SignInModal from './lib/SignInModal.svelte'
-  import UploadModal from './lib/UploadModal.svelte'
+  import UploadPanel from './lib/UploadPanel.svelte'
   import RoleModal from './lib/RoleModal.svelte'
   import ResultsPage from './lib/ResultsPage.svelte'
   import { initAnalytics, identifyUser } from './lib/analytics.js'
@@ -15,7 +15,8 @@
   import { stashPendingResume, hasPendingResume } from './lib/pendingResume.js'
 
   let user = null
-  let uploadModalOpen = false
+  let uploadPanel
+  let uploadError = ''
   let roleModalOpen = false
   let signInModalOpen = false
   let view = 'landing' // 'landing' | 'results'
@@ -47,12 +48,12 @@
   // "Get started" / hero CTA -> ask for the resume first
   function openUploadFlow() {
     if (user) return // already signed in, nothing to do yet (upload flow phase 2)
-    uploadModalOpen = true
+    uploadError = ''
+    uploadPanel.openPicker()
   }
 
   function handleFileReady(file) {
     pendingFile = file
-    uploadModalOpen = false
     roleModalOpen = true
   }
 
@@ -81,6 +82,15 @@
   </main>
 {/if}
 
-<UploadModal open={uploadModalOpen} onClose={() => (uploadModalOpen = false)} onFileReady={handleFileReady} />
+<UploadPanel bind:this={uploadPanel} onFileReady={handleFileReady} onError={(error) => (uploadError = error)} />
+{#if uploadError}
+  <div
+    class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-3 text-sm font-medium shadow-lg"
+    style="background: var(--surface); color: var(--coral); border: 1px solid var(--line);"
+    role="alert"
+  >
+    {uploadError}
+  </div>
+{/if}
 <RoleModal open={roleModalOpen} onClose={() => (roleModalOpen = false)} onSubmit={handleRoleSubmit} />
 <SignInModal open={signInModalOpen} onClose={() => (signInModalOpen = false)} />
