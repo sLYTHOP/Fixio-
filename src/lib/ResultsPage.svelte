@@ -28,6 +28,7 @@
     file_not_found: "We couldn't find your uploaded resume. Please try again.",
     unsupported_file_type: 'Right now we can only analyze PDF resumes — DOCX support is coming soon.',
     llm_error: 'Something went wrong generating your feedback. Please try again in a moment.',
+    llm_empty: 'The AI returned an empty answer. Please try again.',
     parse_error: 'Something went wrong reading your feedback. Please try again.',
     unexpected_error: 'Something unexpected went wrong. Please try again.',
     unauthorized: 'Please log in again and retry.',

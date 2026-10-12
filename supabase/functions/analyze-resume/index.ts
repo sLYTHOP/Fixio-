@@ -3,11 +3,17 @@
 // entry, sends both to Claude, and returns structured skill-gap feedback.
 
 import { createClient } from "npm:@supabase/supabase-js@2"
+import { callClaude, callGemini, parseFeedback } from "./llm.ts"
 
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!
+// Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
+const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? ""
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash" // names change often, set GEMINI_MODEL to override
+const CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-const DAILY_LIMIT = 5 // analyses per user per 24h — protects your Claude credit
+const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
@@ -106,43 +112,24 @@ Instructions:
   "vagueBullets": [{"original": "...", "suggestion": "..."}]
 }`
 
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
-        system: systemPrompt,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-              { type: "text", text: "Analyze this resume per your instructions and return only the JSON." },
-            ],
-          },
-        ],
-      }),
-    })
+    const userText = "Analyze this resume per your instructions and return only the JSON."
+    const useGemini = LLM_PROVIDER === "gemini"
+    const apiKey = useGemini ? GEMINI_API_KEY : ANTHROPIC_API_KEY
+    const model = useGemini ? GEMINI_MODEL : CLAUDE_MODEL
 
-    if (!anthropicRes.ok) {
-      console.error("Anthropic API error:", await anthropicRes.text())
+    if (!apiKey) {
+      console.error(`Missing API key secret for provider "${LLM_PROVIDER}" (${useGemini ? "GEMINI_API_KEY" : "ANTHROPIC_API_KEY"})`)
       return json({ ok: false, reason: "llm_error" })
     }
 
-    const anthropicJson = await anthropicRes.json()
-    const textBlock = anthropicJson.content?.find((b: any) => b.type === "text")
+    const llm = await (useGemini ? callGemini : callClaude)({
+      apiKey, model, systemPrompt, userText, pdfBase64: base64,
+    })
+    if (!llm.ok) return json({ ok: false, reason: llm.reason })
 
-    let parsed
-    try {
-      const cleaned = (textBlock?.text || "").replace(/```json|```/g, "").trim()
-      parsed = JSON.parse(cleaned)
-    } catch {
-      console.error("Failed to parse Claude response:", textBlock?.text)
+    const parsed = parseFeedback(llm.text)
+    if (!parsed) {
+      console.error("Could not use model output:", llm.text.slice(0, 500))
       return json({ ok: false, reason: "parse_error" })
     }
 
@@ -152,7 +139,7 @@ Instructions:
       role,
       level,
       resume_path: resumePath,
-      result: parsed,
+      result: { ...parsed, meta: { provider: LLM_PROVIDER, model } },
     })
 
     return json({ ok: true, result: parsed })
