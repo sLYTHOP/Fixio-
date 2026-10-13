@@ -34,7 +34,7 @@
   ]
 </script>
 
-<section id="pricing" class="py-24 px-6 border-t" style="border-color: var(--line);">
+<section id="pricing" class="py-24 px-6 border-t" style="border-color: #dedee0; background: #F5F5F0; color: var(--paper);">
   <div class="max-w-6xl mx-auto">
     <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight max-w-lg" use:reveal>
       Start free. Upgrade when you're serious.
@@ -45,7 +45,7 @@
         <div
           use:reveal={{ delay: i * 100 }}
           class="rounded-2xl p-8 border flex flex-col transition-transform hover:-translate-y-1"
-          style="border-color: {tier.highlight ? 'var(--lime)' : 'var(--line)'}; background: {tier.highlight ? 'var(--ink)' : 'var(--surface)'}; color: {tier.highlight ? 'var(--paper)' : 'var(--ink)'};"
+          style="border-color: {tier.highlight ? 'var(--lime)' : '#dedee0'}; background: {tier.highlight ? 'var(--paper)' : '#ffffff'}; color: {tier.highlight ? 'var(--ink)' : 'var(--paper)'};"
         >
           <div class="font-display text-lg font-semibold">{tier.name}</div>
           <div class="mt-4 flex items-baseline gap-1">
@@ -66,7 +66,7 @@
           <button
             on:click={onGetStarted}
             class="mt-8 font-display font-semibold text-sm px-6 py-3 rounded-full transition-transform hover:-translate-y-0.5"
-            style="background: {tier.highlight ? 'var(--lime)' : 'var(--ink)'}; color: {tier.highlight ? 'var(--ink)' : 'var(--paper)'};"
+            style="background: var(--lime); color: var(--paper);"
           >
             {tier.cta}
           </button>
