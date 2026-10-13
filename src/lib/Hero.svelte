@@ -64,7 +64,7 @@
             {user ? "You're signed in — upload coming next" : 'Upload resume'}
           </button>
           <p class="text-xs" style="color: var(--ink-soft);">
-            Resumes in PDF only. Max file size 5MB.
+            PDF only, up to 5 MB.
           </p>
         </div>
         <button
