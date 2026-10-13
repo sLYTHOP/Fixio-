@@ -67,10 +67,14 @@
   function openSignInDirect() {
     signInModalOpen = true
   }
+
+  function returnHome() {
+    view = 'landing'
+  }
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} />
+  <ResultsPage {user} onHome={returnHome} />
 {:else}
   <main>
     <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
