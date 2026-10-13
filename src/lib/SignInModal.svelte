@@ -32,12 +32,11 @@
   <div
     class="fixed inset-0 z-50 flex items-center justify-center px-6"
     style="background: color-mix(in srgb, var(--ink) 45%, transparent);"
-    on:click={onClose}
+    on:click|self={onClose}
     role="presentation"
   >
     <div
       class="rounded-2xl max-w-sm w-full p-8 relative"
-      on:click|stopPropagation
       role="dialog"
       tabindex="-1"
       aria-modal="true"

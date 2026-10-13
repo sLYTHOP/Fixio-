@@ -5,7 +5,7 @@
     {
       n: '01',
       title: 'Upload your resume',
-      body: 'Drop in your resume — PDF or DOCX. No forms, no sign-in required yet.',
+      body: 'Drop in your resume as a PDF (up to 5MB). No forms, no sign-in required yet.',
       tint: 'var(--indigo-tint)',
       accent: 'var(--indigo)',
     },

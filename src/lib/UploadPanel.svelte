@@ -10,13 +10,13 @@
     inputEl?.click()
   }
 
-  const MAX_SIZE = 8 * 1024 * 1024 // 8MB
-  const ACCEPTED_EXT = ['.pdf', '.docx']
+  const MAX_SIZE = 5 * 1024 * 1024
+  const ACCEPTED_EXT = ['.pdf']
 
   function validate(file) {
     const nameOk = ACCEPTED_EXT.some(ext => file.name.toLowerCase().endsWith(ext))
-    if (!nameOk) return 'Please upload a PDF or DOCX file.'
-    if (file.size > MAX_SIZE) return 'File is too large — max 8MB.'
+    if (!nameOk) return 'Please upload a PDF file.'
+    if (file.size > MAX_SIZE) return 'File is too large — max 5MB.'
     return ''
   }
 
@@ -41,7 +41,7 @@
 <input
   bind:this={inputEl}
   type="file"
-  accept=".pdf,.docx"
+  accept=".pdf"
   class="hidden"
   on:change={onInputChange}
 />

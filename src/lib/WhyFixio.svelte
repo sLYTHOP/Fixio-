@@ -2,9 +2,9 @@
   import { reveal } from './reveal.js'
 
   const points = [
-    { label: 'Most tools', text: 'Check if a scanner lets your resume through.' },
-    { label: 'We talked to freshers first', text: 'Before writing a line of code.' },
-    { label: 'The real problem', text: "Missing skills and thin projects — not keywords." },
+    'Most tools check your resume’s formatting and keywords. We help you understand how well your profile matches your target role.',
+    'We evaluate your profile against a curated knowledge base built from multiple job descriptions and insights from industry experts.',
+    'We identify your skill gaps and recommend relevant courses and resources to help you close them.',
   ]
 </script>
 
@@ -23,14 +23,13 @@
     </div>
 
     <div class="space-y-4">
-      {#each points as p, i}
+      {#each points as point, i}
         <div
           use:reveal={{ delay: i * 100 }}
           class="rounded-2xl border p-5"
           style="border-color: #dedee0; background: #ffffff;"
         >
-          <p class="font-display text-lg font-semibold">{p.label}</p>
-          <p class="mt-1 text-sm sm:text-base" style="color: #5d5e66;">{p.text}</p>
+          <p class="text-sm sm:text-base leading-relaxed" style="color: #5d5e66;">{point}</p>
         </div>
       {/each}
     </div>
