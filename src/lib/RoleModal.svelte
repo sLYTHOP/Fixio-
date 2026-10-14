@@ -14,6 +14,7 @@
   let waitlistError = ''
   let saving = false
   let waitlistRole = ''
+  let step = 1
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
   async function saveWaitlist() {
