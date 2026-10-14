@@ -32,3 +32,16 @@ export async function uploadResume(userId, file) {
   })
   return { data, error }
 }
+
+// Saves an email to the waitlist table. Already being on the list counts as success.
+export async function joinWaitlist({ email, role = null, source, userId = null }) {
+  const { error } = await supabase.from('waitlist').insert({
+    email: email.trim().toLowerCase(),
+    role,
+    source,
+    user_id: userId,
+  })
+  // 23505 = unique violation: this email is already on the list for this role/source
+  if (error && error.code !== '23505') return { error }
+  return { error: null }
+}

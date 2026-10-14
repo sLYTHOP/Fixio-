@@ -1,12 +1,37 @@
 <script>
   import { ChevronDown } from '@lucide/svelte'
   import { trackEvent } from './analytics.js'
+  import { joinWaitlist } from './supabase.js'
 
   export let open = false
   export let onClose = () => {}
   export let onSubmit = () => {} // (meta: { role, level }) => void
 
   let waitlisted = false
+  let askEmail = false
+  let waitlistEmail = ''
+  let waitlistError = ''
+  let saving = false
+  let waitlistRole = ''
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+  async function saveWaitlist() {
+    if (!EMAIL_RE.test(waitlistEmail.trim())) {
+      waitlistError = 'Please enter a valid email address.'
+      return
+    }
+    saving = true
+    waitlistError = ''
+    const { error } = await joinWaitlist({ email: waitlistEmail, role: waitlistRole, source: 'role_not_ready' })
+    saving = false
+    if (error) {
+      console.error(error)
+      waitlistError = "Couldn't save your email. Please try again."
+      return
+    }
+    trackEvent('waitlist_joined', { role: waitlistRole, source: 'role_not_ready' })
+    waitlisted = true
+  }
 
   const roles = [
     'Cybersecurity',
@@ -48,7 +73,8 @@
 
     if (needsSubRole && !subRoleIsReady) {
       trackEvent('roadmap_interest_clicked', { role, source: 'role_modal_not_ready' })
-      waitlisted = true
+      waitlistRole = role
+      askEmail = true
       return
     }
 
@@ -94,6 +120,29 @@
           style="background: var(--lime); color: var(--paper);"
         >
           Got it
+        </button>
+      {:else if askEmail}
+        <h2 class="font-display text-2xl font-bold tracking-tight">Be first to know</h2>
+        <p class="mt-2 text-sm" style="color: var(--ink-soft);">
+          We don't have a validated skill-gap model for {waitlistRole} yet. Leave your email and we'll write to you when we do. We'll only use it for this.
+        </p>
+        <input
+          type="email"
+          placeholder="you@example.com"
+          bind:value={waitlistEmail}
+          class="w-full mt-5 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
+          style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
+        />
+        {#if waitlistError}
+          <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
+        {/if}
+        <button
+          on:click={saveWaitlist}
+          disabled={saving}
+          class="mt-5 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5 disabled:opacity-60"
+          style="background: var(--lime); color: var(--paper);"
+        >
+          {saving ? 'Saving...' : 'Notify me'}
         </button>
       {:else}
       <h2 id="role-title" class="font-display text-2xl font-bold tracking-tight">

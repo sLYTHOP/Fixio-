@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { uploadResume, supabase } from './supabase.js'
+  import { uploadResume, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
 
@@ -10,6 +10,22 @@
   let uploadError = ''
   let roleMeta = null
   let waitlistClicked = false
+  let waitlistSaving = false
+  let waitlistError = ''
+
+  async function joinRoadmapWaitlist() {
+    waitlistSaving = true
+    waitlistError = ''
+    const { error } = await joinWaitlist({ email: user.email, role: roleMeta?.role, source: 'roadmap_interest', userId: user.id })
+    waitlistSaving = false
+    if (error) {
+      console.error(error)
+      waitlistError = "Couldn't save that. Please try again."
+      return
+    }
+    waitlistClicked = true
+    trackEvent('roadmap_interest_clicked', { role: roleMeta?.role, source: 'results_page' })
+  }
   let feedback = null // real result from analyze-resume: { strengths, gaps, suggestions, vagueBullets }
 
   const phrases = [
@@ -154,13 +170,16 @@
             <p class="font-display font-semibold">Want a step-by-step plan to close these gaps?</p>
             <p class="mt-1 text-sm opacity-80">Courses, certifications, and projects — prioritized for you.</p>
             <button
-              on:click={() => { waitlistClicked = true; trackEvent('roadmap_interest_clicked', { role: roleMeta?.role }) }}
-              disabled={waitlistClicked}
+              on:click={joinRoadmapWaitlist}
+              disabled={waitlistClicked || waitlistSaving}
               class="mt-4 font-display font-semibold text-sm px-6 py-3 rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-60"
               style="background: var(--lime); color: var(--paper);"
             >
-              {waitlistClicked ? "You're on the list!" : 'Join the waitlist'}
+              {waitlistClicked ? "You're on the list!" : waitlistSaving ? 'Saving...' : 'Join the waitlist'}
             </button>
+            {#if waitlistError}
+              <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
+            {/if}
           </div>
         </div>
 
