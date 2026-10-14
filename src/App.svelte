@@ -47,7 +47,6 @@
 
   // "Get started" / hero CTA -> ask for the resume first
   function openUploadFlow() {
-    if (user) return // already signed in, nothing to do yet (upload flow phase 2)
     uploadError = ''
     uploadPanel.openPicker()
   }
@@ -61,7 +60,11 @@
     await stashPendingResume(pendingFile, meta)
     pendingFile = null
     roleModalOpen = false
-    signInModalOpen = true
+    if (user) {
+      view = 'results'
+    } else {
+      signInModalOpen = true
+    }
   }
 
   function openSignInDirect() {
@@ -71,14 +74,19 @@
   function returnHome() {
     view = 'landing'
   }
+
+  function retryUpload() {
+    returnHome()
+    openUploadFlow()
+  }
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} onHome={returnHome} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} />
 {:else}
   <main>
     <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
-    <Hero {user} onGetStarted={openUploadFlow} />
+    <Hero onGetStarted={openUploadFlow} />
     <WhyFixio />
     <HowItWorks />
     <Pricing onGetStarted={openUploadFlow} />

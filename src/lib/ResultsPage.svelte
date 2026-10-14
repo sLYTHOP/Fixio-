@@ -6,6 +6,7 @@
 
   export let user
   export let onHome = () => {}
+  export let onRetry = () => {}
 
   let stage = 'uploading' // uploading -> processing -> done -> error
   let uploadError = ''
@@ -129,6 +130,14 @@
 
         {:else if stage === 'error'}
           <p class="font-display text-xl font-semibold" style="color: var(--coral);">{uploadError}</p>
+          <button
+            type="button"
+            on:click={onRetry}
+            class="mt-6 rounded-full px-6 py-3 text-sm font-semibold transition-transform hover:-translate-y-0.5"
+            style="background: var(--lime); color: var(--paper);"
+          >
+            Upload another resume
+          </button>
         {/if}
       </div>
     </div>

@@ -3,7 +3,6 @@
   import gsap from 'gsap'
   import { trackEvent } from './analytics.js'
 
-  export let user = null
   export let onGetStarted = () => {}
 
   let windowEl
@@ -27,7 +26,6 @@
   })
 
   function handleClick(location) {
-    if (user) return
     trackEvent('get_started_clicked', { location })
     onGetStarted()
   }
@@ -61,7 +59,7 @@
             class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
             style="background: var(--lime); color: var(--paper);"
           >
-            {user ? "You're signed in — upload coming next" : 'Upload resume'}
+            Upload resume
           </button>
           <p class="text-xs" style="color: var(--ink-soft);">
             PDF only, up to 5 MB.
