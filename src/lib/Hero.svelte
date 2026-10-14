@@ -55,13 +55,18 @@
       </p>
 
       <div class="mt-9 flex flex-col sm:flex-row items-center lg:items-start justify-center lg:justify-start gap-4">
-        <button
-          on:click={() => handleClick('hero_primary')}
-          class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
-          style="background: var(--lime); color: var(--paper);"
-        >
-          {user ? "You're signed in — upload coming next" : 'Upload resume'}
-        </button>
+        <div class="flex flex-col items-center lg:items-start gap-2">
+          <button
+            on:click={() => handleClick('hero_primary')}
+            class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style="background: var(--lime); color: var(--paper);"
+          >
+            {user ? "You're signed in — upload coming next" : 'Upload resume'}
+          </button>
+          <p class="text-xs" style="color: var(--ink-soft);">
+            PDF only, up to 5 MB.
+          </p>
+        </div>
         <button
           on:click={scrollToHowItWorks}
           class="font-display font-semibold text-base px-7 py-4 rounded-full border transition-colors hover:bg-[var(--surface)]"

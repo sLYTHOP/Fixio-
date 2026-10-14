@@ -5,6 +5,7 @@
   import { trackEvent } from './analytics.js'
 
   export let user
+  export let onHome = () => {}
 
   let stage = 'uploading' // uploading -> processing -> done -> error
   let uploadError = ''
@@ -42,7 +43,7 @@
   const errorMessages = {
     no_knowledge_base: "We don't have validated feedback for this role yet.",
     file_not_found: "We couldn't find your uploaded resume. Please try again.",
-    unsupported_file_type: 'Right now we can only analyze PDF resumes — DOCX support is coming soon.',
+    unsupported_file_type: 'Please upload your resume as a PDF file.',
     llm_error: 'Something went wrong generating your feedback. Please try again in a moment.',
     llm_empty: 'The AI returned an empty answer. Please try again.',
     parse_error: 'Something went wrong reading your feedback. Please try again.',
@@ -75,7 +76,7 @@
     stage = 'processing'
     phraseTimer = setInterval(() => {
       phraseIndex = (phraseIndex + 1) % phrases.length
-    }, 1400)
+    }, 3200)
 
     const { data, error: fnError } = await supabase.functions.invoke('analyze-resume', {
       body: { role: roleMeta?.role, level: roleMeta?.level, resumePath: uploadData.path },
@@ -99,9 +100,18 @@
   onDestroy(() => clearInterval(phraseTimer))
 </script>
 
-<section class="min-h-screen px-6 py-32">
+<section class="relative min-h-screen px-6 {stage === 'uploading' || stage === 'processing' || stage === 'error' ? 'flex items-center justify-center py-6' : 'py-32'}">
+  <button
+    type="button"
+    on:click={onHome}
+    class="absolute left-6 top-6 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+    style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+  >
+    Back to home
+  </button>
+
   {#if stage === 'uploading' || stage === 'processing' || stage === 'error'}
-    <div class="flex items-center justify-center min-h-[40vh]">
+    <div class="flex w-full items-center justify-center">
       <div class="max-w-lg w-full text-center">
         {#if stage === 'uploading'}
           <p class="font-display text-2xl font-semibold">Uploading your resume...</p>

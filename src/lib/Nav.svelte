@@ -10,10 +10,11 @@
 <header class="fixed top-0 inset-x-0 z-40 border-b" style="border-color: var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(8px);">
   <nav class="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
     <a href="#top" class="font-display text-xl font-semibold tracking-tight flex items-center gap-2">
-      <svg width="24" height="24" viewBox="0 0 400 400" fill="none">
-        <path d="M120 110 L92 110 Q80 110 80 122 L80 278 Q80 290 92 290 L120 290" stroke="var(--lime)" stroke-width="22" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M280 110 L308 110 Q320 110 320 122 L320 278 Q320 290 308 290 L280 290" stroke="var(--lime)" stroke-width="22" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M152 205 L188 240 L252 165" stroke="var(--lime)" stroke-width="24" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <svg width="24" height="24" viewBox="0 0 400 400" fill="none" aria-hidden="true">
+        <rect width="400" height="400" rx="64" fill="#17181C"/>
+        <path d="M120 110 L92 110 Q80 110 80 122 L80 278 Q80 290 92 290 L120 290" stroke="#CFFF3D" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M280 110 L308 110 Q320 110 320 122 L320 278 Q320 290 308 290 L280 290" stroke="#CFFF3D" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M152 205 L188 240 L252 165" stroke="#CFFF3D" stroke-width="18" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       Fixio
     </a>
