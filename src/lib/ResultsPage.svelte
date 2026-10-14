@@ -3,6 +3,7 @@
   import { uploadResume, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
+  import ResumePreview from './ResumePreview.svelte'
 
   export let user
   export let onHome = () => {}
@@ -11,6 +12,8 @@
   let stage = 'uploading' // uploading -> processing -> done -> error
   let uploadError = ''
   let roleMeta = null
+  let resumeFile = null
+  let activeIssue = null
   let waitlistClicked = false
   let waitlistSaving = false
   let waitlistError = ''
@@ -56,6 +59,7 @@
 
   onMount(async () => {
     const file = getPendingResume()
+    resumeFile = file
     roleMeta = getPendingMeta()
     if (!file) {
       stage = 'error'
@@ -90,6 +94,14 @@
       uploadError = errorMessages[data?.reason] || 'Something went wrong. Please try again.'
       console.error(fnError || data)
       trackEvent('feedback_failed', { reason: data?.reason || 'invoke_error' })
+      return
+    }
+
+    if (!Array.isArray(data.result?.issues)) {
+      stage = 'error'
+      uploadError = 'Resume feedback could not be displayed because the analysis service needs an update. Please try again later.'
+      console.error('[ResultsPage] analysis response is missing structured issues', data.result)
+      trackEvent('feedback_failed', { reason: 'missing_structured_issues' })
       return
     }
 
@@ -143,47 +155,84 @@
     </div>
 
   {:else if stage === 'done'}
-    <div class="max-w-5xl mx-auto">
+    <div class="max-w-7xl mx-auto">
       <h1 class="font-display text-3xl font-bold tracking-tight">
         Alright {firstName}, here's how you match up{roleMeta?.role ? ` for ${roleMeta.role}` : ''}
       </h1>
+      <p class="mt-2 text-sm" style="color: var(--ink-soft);">
+        Review the marked sections of your resume, then use the solutions to decide what to improve.
+      </p>
 
-      <div class="mt-8 grid lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 space-y-6">
-          <div class="text-left rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
-            <p class="font-display font-semibold">Your experience looks solid on:</p>
-            <div class="mt-3 flex flex-wrap gap-2">
-              {#each feedback.strengths as s}
-                <span class="text-xs font-semibold px-2.5 py-1 rounded-full" style="background: var(--lime-tint); color: var(--lime);">{s}</span>
-              {/each}
-            </div>
+      <div class="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div class="space-y-6">
+          <ResumePreview file={resumeFile} issues={feedback.issues} bind:activeIssue />
 
-            <p class="font-display font-semibold mt-6">Here's what's missing:</p>
-            <ul class="mt-3 space-y-2 text-sm" style="color: var(--ink-soft);">
-              {#each feedback.gaps as g}
-                <li>• {g}</li>
-              {/each}
-            </ul>
-
-            <p class="font-display font-semibold mt-6">Worth looking into:</p>
-            <ul class="mt-3 space-y-2 text-sm" style="color: var(--ink-soft);">
-              {#each feedback.suggestions as s}
-                <li>• {s}</li>
-              {/each}
-            </ul>
-
-            {#if feedback.vagueBullets?.length}
-              <p class="font-display font-semibold mt-6">Worth sharpening:</p>
-              <div class="mt-3 space-y-3">
-                {#each feedback.vagueBullets as vb}
-                  <div class="text-sm rounded-xl p-3" style="background: var(--coral-tint);">
-                    <p style="color: var(--ink-soft);">"{vb.original}"</p>
-                    <p class="mt-1" style="color: var(--coral);">→ {vb.suggestion}</p>
-                  </div>
+          {#if feedback.strengths.length}
+            <section class="rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
+              <h2 class="font-display font-semibold">What your resume already shows well</h2>
+              <div class="mt-3 flex flex-wrap gap-2">
+                {#each feedback.strengths as strength}
+                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold" style="background: var(--lime-tint); color: var(--lime);">
+                    {strength}
+                  </span>
                 {/each}
               </div>
+            </section>
+          {/if}
+        </div>
+
+        <div class="space-y-6">
+          <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h2 class="font-display text-xl font-semibold">Issues found &amp; solutions</h2>
+                <p class="mt-1 text-sm" style="color: var(--ink-soft);">
+                  Select an issue to locate it in your resume.
+                </p>
+              </div>
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold" style="background: var(--coral-tint); color: var(--coral);">
+                {feedback.issues.length}
+              </span>
+            </div>
+
+            {#if feedback.issues.length}
+              <div class="mt-5 space-y-3">
+                {#each feedback.issues as issue, i}
+                  <button
+                    type="button"
+                    aria-pressed={activeIssue === i}
+                    on:click={() => (activeIssue = activeIssue === i ? null : i)}
+                    class="w-full rounded-xl border p-4 text-left transition-colors"
+                    style="border-color: {activeIssue === i ? 'var(--lime)' : 'var(--line)'};
+                           background: {activeIssue === i ? 'var(--surface-2)' : 'transparent'};"
+                  >
+                    <span class="text-xs font-semibold uppercase tracking-wide" style="color: var(--coral);">
+                      {issue.section}
+                    </span>
+                    <span class="mt-1 block text-sm font-semibold">{issue.issue}</span>
+                    <span class="mt-2 block text-sm leading-relaxed" style="color: var(--ink-soft);">
+                      <span class="font-semibold" style="color: var(--lime);">Try this:</span> {issue.solution}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <p class="mt-5 rounded-xl p-4 text-sm" style="background: var(--surface-2); color: var(--ink-soft);">
+                No specific issues were identified for this resume.
+              </p>
             {/if}
-          </div>
+          </section>
+
+          {#if feedback.suggestions.length}
+            <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
+              <h2 class="font-display font-semibold">Suggested next steps</h2>
+              <ul class="mt-3 space-y-2 text-sm leading-relaxed" style="color: var(--ink-soft);">
+                {#each feedback.suggestions as suggestion}
+                  <li>• {suggestion}</li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
 
           <div class="rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
             <p class="font-display font-semibold">Want a step-by-step plan to close these gaps?</p>
@@ -191,7 +240,7 @@
             <button
               on:click={joinRoadmapWaitlist}
               disabled={waitlistClicked || waitlistSaving}
-              class="mt-4 font-display font-semibold text-sm px-6 py-3 rounded-full transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+              class="mt-4 rounded-full px-6 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5 disabled:opacity-60"
               style="background: var(--lime); color: var(--paper);"
             >
               {waitlistClicked ? "You're on the list!" : waitlistSaving ? 'Saving...' : 'Join the waitlist'}
@@ -200,40 +249,21 @@
               <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
             {/if}
           </div>
-        </div>
 
-        <!-- desktop sidebar: keeps wide screens balanced instead of empty space -->
-        <div class="lg:col-span-1">
-          <div class="rounded-2xl border p-6 text-left sticky top-24" style="border-color: var(--line); background: var(--surface);">
+          <div class="rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
             <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-soft);">Snapshot</p>
-
             {#if roleMeta?.role}
               <div class="mt-4">
                 <p class="text-xs" style="color: var(--ink-soft);">Target role</p>
-                <p class="font-display font-semibold mt-0.5">{roleMeta.role}</p>
+                <p class="mt-0.5 font-display font-semibold">{roleMeta.role}</p>
               </div>
             {/if}
             {#if roleMeta?.level}
               <div class="mt-4">
                 <p class="text-xs" style="color: var(--ink-soft);">Profile</p>
-                <p class="font-semibold mt-0.5 capitalize">{roleMeta.level === 'fresher' ? 'Fresher' : 'Career switcher'}</p>
+                <p class="mt-0.5 font-semibold capitalize">{roleMeta.level === 'fresher' ? 'Fresher' : 'Career switcher'}</p>
               </div>
             {/if}
-
-            <div class="mt-5 pt-5 border-t flex gap-4" style="border-color: var(--line);">
-              <div>
-                <p class="font-display text-2xl font-bold" style="color: var(--lime);">{feedback.strengths.length}</p>
-                <p class="text-xs" style="color: var(--ink-soft);">strengths found</p>
-              </div>
-              <div>
-                <p class="font-display text-2xl font-bold" style="color: var(--coral);">{feedback.gaps.length}</p>
-                <p class="text-xs" style="color: var(--ink-soft);">gaps found</p>
-              </div>
-            </div>
-
-            <p class="mt-5 pt-5 border-t text-xs" style="border-color: var(--line); color: var(--ink-soft);">
-              Grounded in real job descriptions for this role — not a generic ATS score.
-            </p>
           </div>
         </div>
       </div>

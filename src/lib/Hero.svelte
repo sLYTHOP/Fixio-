@@ -56,14 +56,12 @@
         <div class="flex flex-col items-center lg:items-start gap-2">
           <button
             on:click={() => handleClick('hero_primary')}
-            class="font-display font-semibold text-base px-7 py-4 rounded-full transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            class="flex flex-col items-center justify-center rounded-full px-7 py-3 font-display transition-all hover:-translate-y-0.5 hover:shadow-lg"
             style="background: var(--lime); color: var(--paper);"
           >
-            Upload resume
+            <span class="text-base font-semibold leading-tight">Upload resume</span>
+            <span class="mt-0.5 text-xs font-medium leading-tight">PDF only, up to 5 MB</span>
           </button>
-          <p class="text-xs" style="color: var(--ink-soft);">
-            PDF only, up to 5 MB.
-          </p>
         </div>
         <button
           on:click={scrollToHowItWorks}

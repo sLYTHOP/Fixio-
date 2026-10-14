@@ -102,12 +102,21 @@ ${kb.content}
 
 Instructions:
 - Compare the resume against the knowledge base above. Identify genuine strengths (skills/experience clearly present and relevant), genuine gaps (things the knowledge base says matter that are missing or weak), and 2-4 concrete, actionable suggestions (specific certs, projects, or learning paths drawn from the knowledge base) to close those gaps.
-- Separately, flag up to 2 resume bullet points that read as vague or generic (lacking specifics like tools used, scale, or outcome) and briefly note what detail would make them more convincing. Never accuse the candidate of lying — just note the bullet could be more specific.
+- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF.
+- Also flag up to 2 resume bullet points that read as vague or generic (lacking specifics like tools used, scale, or outcome). Never accuse the candidate of lying — just note the bullet could be more specific.
 - Be honest and specific. Do not pad the strengths list with things not actually supported by the resume text.
 - Respond with ONLY valid JSON, no prose before or after, in this exact shape:
 {
   "strengths": ["short phrase", "..."],
   "gaps": ["short phrase with a brief why-it-matters", "..."],
+  "issues": [
+    {
+      "section": "exact resume section heading",
+      "excerpt": "exact contiguous resume text, or null when the skill/detail is missing",
+      "issue": "what is weak or missing and why it matters",
+      "solution": "a concrete, role-relevant way to improve it"
+    }
+  ],
   "suggestions": ["specific actionable suggestion", "..."],
   "vagueBullets": [{"original": "...", "suggestion": "..."}]
 }`

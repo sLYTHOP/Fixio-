@@ -14,6 +14,7 @@ export type Feedback = {
   strengths: string[]
   gaps: string[]
   suggestions: string[]
+  issues: { section: string; excerpt: string | null; issue: string; solution: string }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
 
@@ -29,7 +30,7 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
     },
     body: JSON.stringify({
       model: o.model,
-      max_tokens: 1500,
+      max_tokens: 3500,
       system: o.systemPrompt,
       messages: [{
         role: "user",
@@ -121,16 +122,33 @@ export function parseFeedback(text: string): Feedback | null {
   if (!raw || typeof raw !== "object") return null
 
   const vague = Array.isArray(raw.vagueBullets) ? raw.vagueBullets : []
+  const issues = Array.isArray(raw.issues) ? raw.issues : []
   const out: Feedback = {
     strengths: strList(raw.strengths),
     gaps: strList(raw.gaps),
     suggestions: strList(raw.suggestions),
+    issues: issues
+      .filter((item: any) =>
+        item &&
+        typeof item.section === "string" &&
+        typeof item.issue === "string" &&
+        typeof item.solution === "string" &&
+        (item.excerpt === null || typeof item.excerpt === "string")
+      )
+      .map((item: any) => ({
+        section: item.section.trim(),
+        excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
+        issue: item.issue.trim(),
+        solution: item.solution.trim(),
+      }))
+      .filter((item) => item.section && item.issue && item.solution),
     vagueBullets: vague
       .filter((b: any) => b && typeof b.original === "string" && typeof b.suggestion === "string")
       .slice(0, 2)
       .map((b: any) => ({ original: b.original, suggestion: b.suggestion })),
   }
+  if ((out.gaps.length || out.vagueBullets.length) && !out.issues.length) return null
   // An answer with nothing in any list is a failed answer, not feedback.
-  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length) return null
+  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length && !out.issues.length) return null
   return out
 }

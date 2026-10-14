@@ -20,5 +20,9 @@ npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-your-real-key-here
 ## 5. Deploy the function
 npx supabase functions deploy analyze-resume
 
+Deploy again whenever `index.ts` or `llm.ts` changes. The results page now reads
+the structured `issues` entries returned by this function to annotate the resume
+and pair each gap with a solution.
+
 ## 6. Confirm it's live
 Check Supabase dashboard -> Edge Functions -> you should see "analyze-resume" listed.
