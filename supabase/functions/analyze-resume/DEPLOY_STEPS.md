@@ -26,3 +26,12 @@ and pair each gap with a solution.
 
 ## 6. Confirm it's live
 Check Supabase dashboard -> Edge Functions -> you should see "analyze-resume" listed.
+
+## Optional settings (Supabase secrets)
+GEMINI_MODELS   comma-separated model names, tried in order, best first. Example: GEMINI_MODELS="model-a,model-b"
+                (list the names your key can use: see the models command in the chat notes)
+LLM_FALLBACK    "claude" to use Claude only when every Gemini model has failed. Default "none".
+                Needs the ANTHROPIC_API_KEY secret and credit on that account.
+Each model gets 2 tries with a pause between them. Failures are logged with the status code
+(Supabase -> Edge Functions -> analyze-resume -> Logs) and the list of attempts is saved
+inside each result under meta.tried.

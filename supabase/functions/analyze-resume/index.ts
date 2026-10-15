@@ -3,17 +3,31 @@
 // entry, sends both to Claude, and returns structured skill-gap feedback.
 
 import { createClient } from "npm:@supabase/supabase-js@2"
-import { callClaude, callGemini, parseFeedback } from "./llm.ts"
+import { parseFeedback, runWithFallback, type Attempt } from "./llm.ts"
 
 // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
 const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? ""
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash" // names change often, set GEMINI_MODEL to override
+// Comma-separated list, tried in order: best model first, a lighter or less busy one after.
+// (GEMINI_MODEL with a single name still works.)
+const GEMINI_MODELS = (Deno.env.get("GEMINI_MODELS") ?? Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash")
+  .split(",").map((m) => m.trim()).filter(Boolean)
+// Optional second provider, used only if the first one keeps failing: "claude", "gemini" or "none" (default).
+const LLM_FALLBACK = (Deno.env.get("LLM_FALLBACK") ?? "none").toLowerCase()
 const CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+
+function buildAttempts(): Attempt[] {
+  const gemini = (): Attempt[] =>
+    GEMINI_API_KEY ? GEMINI_MODELS.map((model) => ({ provider: "gemini" as const, model, apiKey: GEMINI_API_KEY, tries: 2 })) : []
+  const claude = (): Attempt[] =>
+    ANTHROPIC_API_KEY ? [{ provider: "claude" as const, model: CLAUDE_MODEL, apiKey: ANTHROPIC_API_KEY, tries: 2 }] : []
+  const order = [LLM_PROVIDER, ...(LLM_FALLBACK !== "none" && LLM_FALLBACK !== LLM_PROVIDER ? [LLM_FALLBACK] : [])]
+  return order.flatMap((p) => (p === "gemini" ? gemini() : p === "claude" ? claude() : []))
+}
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
@@ -122,25 +136,24 @@ Instructions:
 }`
 
     const userText = "Analyze this resume per your instructions and return only the JSON."
-    const useGemini = LLM_PROVIDER === "gemini"
-    const apiKey = useGemini ? GEMINI_API_KEY : ANTHROPIC_API_KEY
-    const model = useGemini ? GEMINI_MODEL : CLAUDE_MODEL
 
-    if (!apiKey) {
-      console.error(`Missing API key secret for provider "${LLM_PROVIDER}" (${useGemini ? "GEMINI_API_KEY" : "ANTHROPIC_API_KEY"})`)
-      return json({ ok: false, reason: "llm_error" })
+    const attempts = buildAttempts()
+    if (!attempts.length) {
+      console.error(`No usable AI provider: LLM_PROVIDER=${LLM_PROVIDER}, LLM_FALLBACK=${LLM_FALLBACK}. Check the GEMINI_API_KEY / ANTHROPIC_API_KEY secrets.`)
+      return json({ ok: false, reason: "llm_error", detail: "no provider configured" })
     }
 
-    const llm = await (useGemini ? callGemini : callClaude)({
-      apiKey, model, systemPrompt, userText, pdfBase64: base64,
+    // Retries, model fallback and timeouts happen here, silently. The user just waits a bit longer.
+    const llm = await runWithFallback(attempts, { systemPrompt, userText, pdfBase64: base64 }, {
+      validate: (text) => parseFeedback(text) !== null,
     })
-    if (!llm.ok) return json({ ok: false, reason: llm.reason })
+    if (!llm.ok) {
+      console.error("All model attempts failed:", llm.detail)
+      return json({ ok: false, reason: llm.reason, detail: llm.detail })
+    }
 
     const parsed = parseFeedback(llm.text)
-    if (!parsed) {
-      console.error("Could not use model output:", llm.text.slice(0, 500))
-      return json({ ok: false, reason: "parse_error" })
-    }
+    if (!parsed) return json({ ok: false, reason: "parse_error" })
 
     // 4. Save to feedback table (best-effort — don't fail the request if this fails)
     await supabase.from("feedback").insert({
@@ -148,7 +161,7 @@ Instructions:
       role,
       level,
       resume_path: resumePath,
-      result: { ...parsed, meta: { provider: LLM_PROVIDER, model } },
+      result: { ...parsed, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
     })
 
     return json({ ok: true, result: parsed })
