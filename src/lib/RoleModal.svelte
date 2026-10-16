@@ -1,39 +1,16 @@
 <script>
   import { ChevronDown } from '@lucide/svelte'
   import { trackEvent } from './analytics.js'
-  import { joinWaitlist } from './supabase.js'
 
   export let open = false
   export let onClose = () => {}
   /** @type {(meta: { role: string, level: string }) => void} */
   export let onSubmit = () => {}
+  /** @type {(role: string) => void} */
+  export let onJoinWaitlist = () => {}
 
-  let waitlisted = false
-  let askEmail = false
-  let waitlistEmail = ''
-  let waitlistError = ''
-  let saving = false
-  let waitlistRole = ''
+  let submittedUnsupportedRole = false
   let step = 1
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-  async function saveWaitlist() {
-    if (!EMAIL_RE.test(waitlistEmail.trim())) {
-      waitlistError = 'Please enter a valid email address.'
-      return
-    }
-    saving = true
-    waitlistError = ''
-    const { error } = await joinWaitlist({ email: waitlistEmail, role: waitlistRole, source: 'role_not_ready' })
-    saving = false
-    if (error) {
-      console.error(error)
-      waitlistError = "Couldn't save your email. Please try again."
-      return
-    }
-    trackEvent('waitlist_joined', { role: waitlistRole, source: 'role_not_ready' })
-    waitlisted = true
-  }
 
   const roles = [
     'Cybersecurity',
@@ -60,7 +37,6 @@
   let level = ''
 
   $: needsSubRole = selectedRole === 'Cybersecurity'
-  $: subRoleIsReady = !needsSubRole || cyberSubRoles.find(s => s.label === subRole)?.ready
   $: canContinue =
     (selectedRole === 'Other' ? otherRole.trim().length > 0 : !!selectedRole) &&
     (!needsSubRole || !!subRole)
@@ -81,7 +57,7 @@
 
   function close() {
     step = 1
-    waitlisted = false
+    submittedUnsupportedRole = false
     onClose()
   }
 
@@ -96,15 +72,21 @@
   function submit() {
     const role = selectedRole === 'Other' ? otherRole.trim() : (subRole || selectedRole)
 
-    if (needsSubRole && !subRoleIsReady) {
-      trackEvent('roadmap_interest_clicked', { role, source: 'role_modal_not_ready' })
-      waitlistRole = role
-      askEmail = true
+    trackEvent('role_questionnaire_submitted', { role, level })
+    if (role !== 'SOC Analyst') {
+      submittedUnsupportedRole = true
+      trackEvent('role_waitlist_prompt_shown', { role })
       return
     }
 
-    trackEvent('role_questionnaire_submitted', { role, level })
     onSubmit({ role, level })
+  }
+
+  function startWaitlistSignup() {
+    const role = selectedRole === 'Other' ? otherRole.trim() : (subRole || selectedRole)
+    trackEvent('role_waitlist_signup_started', { role })
+    onJoinWaitlist(role)
+    close()
   }
 </script>
 
@@ -135,40 +117,17 @@
         ✕
       </button>
 
-      {#if waitlisted}
-        <h2 class="font-display text-2xl font-bold tracking-tight">You're on the list</h2>
+      {#if submittedUnsupportedRole}
+        <h2 class="font-display text-2xl font-bold tracking-tight">Coming soon</h2>
         <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-          We don't have a validated skill-gap model for this track yet — we'll email you the moment we do.
+          We’re still building support for this role. Join the waitlist to be notified when it becomes available.
         </p>
         <button
-          on:click={close}
-          class="mt-7 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5"
+          on:click={startWaitlistSignup}
+          class="mt-6 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5"
           style="background: var(--lime); color: var(--paper);"
         >
-          Got it
-        </button>
-      {:else if askEmail}
-        <h2 class="font-display text-2xl font-bold tracking-tight">Be first to know</h2>
-        <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-          We don't have a validated skill-gap model for {waitlistRole} yet. Leave your email and we'll write to you when we do. We'll only use it for this.
-        </p>
-        <input
-          type="email"
-          placeholder="you@example.com"
-          bind:value={waitlistEmail}
-          class="w-full mt-5 rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
-          style="border-color: var(--line); background: var(--surface-2); color: var(--ink);"
-        />
-        {#if waitlistError}
-          <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
-        {/if}
-        <button
-          on:click={saveWaitlist}
-          disabled={saving}
-          class="mt-5 w-full font-display font-semibold text-sm px-6 py-3.5 rounded-full transition-all hover:-translate-y-0.5 disabled:opacity-60"
-          style="background: var(--lime); color: var(--paper);"
-        >
-          {saving ? 'Saving...' : 'Notify me'}
+          Join Waitlist
         </button>
       {:else}
         <div class="mb-6 pr-10">
@@ -276,7 +235,7 @@
               class="w-full rounded-full px-6 py-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:flex-1"
               style="background: var(--lime); color: var(--paper);"
             >
-              {needsSubRole && subRole && !subRoleIsReady ? 'Join the waitlist instead' : 'Continue'}
+              Submit
             </button>
           </div>
         {/if}

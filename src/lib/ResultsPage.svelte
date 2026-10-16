@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { uploadResume, supabase, joinWaitlist } from './supabase.js'
+  import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
   import ResumePreview from './ResumePreview.svelte'
@@ -9,7 +9,7 @@
   export let onHome = () => {}
   export let onRetry = () => {}
 
-  let stage = 'uploading' // uploading -> processing -> done -> error
+  let stage = 'loading' // loading -> uploading -> processing -> done -> error
   let uploadError = ''
   let roleMeta = null
   let resumeFile = null
@@ -55,18 +55,49 @@
     unauthorized: 'Please log in again and retry.',
     forbidden: 'Something went wrong with your upload. Please try again.',
     rate_limited: "You've hit today's limit of resume scans. Please come back tomorrow.",
+    feedback_save_error: "Your feedback was generated but couldn't be saved. Please try again.",
   }
 
   onMount(async () => {
     const file = getPendingResume()
-    resumeFile = file
     roleMeta = getPendingMeta()
     if (!file) {
-      stage = 'error'
-      uploadError = "We couldn't find your resume — please upload it again."
+      const { data: savedFeedback, error: feedbackError } = await getLatestFeedback(user.id)
+      if (feedbackError) {
+        stage = 'error'
+        uploadError = "We couldn't load your saved feedback. Please try again."
+        console.error('[ResultsPage] failed to load saved feedback', feedbackError)
+        return
+      }
+      if (!savedFeedback) {
+        onHome()
+        return
+      }
+
+      const { data: savedResume, error: resumeError } = await downloadResume(savedFeedback.resume_path)
+      if (resumeError || !savedResume) {
+        stage = 'error'
+        uploadError = "We couldn't load the resume for your saved feedback. Please upload it again."
+        console.error('[ResultsPage] failed to download saved resume', resumeError)
+        return
+      }
+
+      const resumeName = savedFeedback.resume_path.split('/').pop() || 'resume.pdf'
+      resumeFile = new File([savedResume], resumeName, { type: savedResume.type || 'application/pdf' })
+      roleMeta = { role: savedFeedback.role, level: savedFeedback.level }
+      if (!Array.isArray(savedFeedback.result?.issues)) {
+        stage = 'error'
+        uploadError = 'Your saved feedback could not be displayed. Please upload your resume for a new analysis.'
+        console.error('[ResultsPage] saved analysis is missing structured issues', savedFeedback.result)
+        return
+      }
+      feedback = savedFeedback.result
+      stage = 'done'
       return
     }
 
+    resumeFile = file
+    stage = 'uploading'
     const { data: uploadData, error: uploadErr } = await uploadResume(user.id, file)
     clearPendingResume()
 
@@ -113,7 +144,7 @@
   onDestroy(() => clearInterval(phraseTimer))
 </script>
 
-<section class="relative min-h-screen px-6 {stage === 'uploading' || stage === 'processing' || stage === 'error' ? 'flex items-center justify-center py-6' : 'py-32'}">
+<section class="relative min-h-screen px-6 {stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error' ? 'flex items-center justify-center py-6' : 'py-32'}">
   <button
     type="button"
     on:click={onHome}
@@ -123,10 +154,13 @@
     Back to home
   </button>
 
-  {#if stage === 'uploading' || stage === 'processing' || stage === 'error'}
+  {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
     <div class="flex w-full items-center justify-center">
       <div class="max-w-lg w-full text-center">
-        {#if stage === 'uploading'}
+        {#if stage === 'loading'}
+          <p class="font-display text-2xl font-semibold">Loading your recent analysis...</p>
+
+        {:else if stage === 'uploading'}
           <p class="font-display text-2xl font-semibold">Uploading your resume...</p>
 
         {:else if stage === 'processing'}

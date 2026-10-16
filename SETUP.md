@@ -17,7 +17,7 @@ This outputs a static site to `dist/` — deploy that folder to Vercel, Netlify,
 ## Before you go live
 
 1. **PostHog key** — open `src/lib/analytics.js` and replace `phc_REPLACE_ME` with your real project API key (and host, if self-hosting). Until you do, analytics is silently disabled so nothing breaks.
-2. **Google Sign-In** — the "Continue with Google" button in `src/lib/SignInModal.svelte` is currently a placeholder (it just closes the modal). Wire up real Google OAuth here once your backend/auth provider is ready.
+2. **Google Sign-In** — configure the Google provider in Supabase Auth and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the project environment. The sign-in modal uses Supabase OAuth.
 3. **Pricing** — `src/lib/Pricing.svelte` has placeholder tiers (Free / ₹199 Pro). Swap in your real numbers whenever they're finalized.
 4. **Brand name** — "Fixio" is a placeholder name used in the nav and footer. Search-replace it once you land on a real name.
 5. **Socials** — footer links in `src/lib/Footer.svelte` point to placeholder URLs (`linkedin.com`, `instagram.com`, `x.com`) — swap in your real profile links.

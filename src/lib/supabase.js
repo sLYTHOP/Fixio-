@@ -33,6 +33,20 @@ export async function uploadResume(userId, file) {
   return { data, error }
 }
 
+export async function getLatestFeedback(userId) {
+  return supabase
+    .from('feedback')
+    .select('role, level, resume_path, result')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+}
+
+export async function downloadResume(path) {
+  return supabase.storage.from('resumes').download(path)
+}
+
 // Saves an email to the waitlist table. Already being on the list counts as success.
 export async function joinWaitlist({ email, role = null, source, userId = null }) {
   const { error } = await supabase.from('waitlist').insert({

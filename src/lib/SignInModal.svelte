@@ -4,6 +4,7 @@
 
   export let open = false
   export let onClose = () => {}
+  export let waitlistRole = ''
 
   let loading = false
   let error = ''
@@ -52,10 +53,12 @@
       </button>
 
       <h2 id="signin-title" class="font-display text-2xl font-bold tracking-tight">
-        One step away
+        {waitlistRole ? 'Join the waitlist' : 'One step away'}
       </h2>
       <p class="mt-2 text-sm" style="color: var(--ink-soft);">
-        Sign in with Google to see your feedback.
+        {waitlistRole
+          ? `Sign in with Google to join the ${waitlistRole} waitlist and be notified when it becomes available.`
+          : 'Sign in with Google to see your feedback.'}
       </p>
 
       <button

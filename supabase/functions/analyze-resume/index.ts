@@ -155,14 +155,18 @@ Instructions:
     const parsed = parseFeedback(llm.text)
     if (!parsed) return json({ ok: false, reason: "parse_error" })
 
-    // 4. Save to feedback table (best-effort — don't fail the request if this fails)
-    await supabase.from("feedback").insert({
+    // 4. Persist the result so the user can revisit it later.
+    const { error: saveError } = await supabase.from("feedback").insert({
       user_id: authedUser.id,
       role,
       level,
       resume_path: resumePath,
       result: { ...parsed, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
     })
+    if (saveError) {
+      console.error("Failed to save feedback:", saveError)
+      return json({ ok: false, reason: "feedback_save_error" }, 500)
+    }
 
     return json({ ok: true, result: parsed })
   } catch (e) {

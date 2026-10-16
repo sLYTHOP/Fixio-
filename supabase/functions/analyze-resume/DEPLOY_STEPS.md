@@ -24,7 +24,14 @@ Deploy again whenever `index.ts` or `llm.ts` changes. The results page now reads
 the structured `issues` entries returned by this function to annotate the resume
 and pair each gap with a solution.
 
-## 6. Confirm it's live
+## 6. Apply the database migration
+npx supabase db push
+
+This applies pending migrations, including the policies for reading saved feedback
+and the authenticated waitlist table used by the role sign-up flow. The analysis
+is stored in the existing `feedback` table and is shown again when the user signs in.
+
+## 7. Confirm it's live
 Check Supabase dashboard -> Edge Functions -> you should see "analyze-resume" listed.
 
 ## Optional settings (Supabase secrets)
