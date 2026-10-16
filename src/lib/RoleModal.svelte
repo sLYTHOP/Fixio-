@@ -118,8 +118,8 @@
       </button>
 
       {#if submittedUnsupportedRole}
-        <h2 class="font-display text-2xl font-bold tracking-tight">Coming soon</h2>
-        <p class="mt-2 text-sm" style="color: var(--ink-soft);">
+        <h2 class="text-center font-display text-2xl font-bold tracking-tight">Coming soon</h2>
+        <p class="mt-2 text-center text-sm" style="color: var(--ink-soft);">
           We’re still building support for this role. Join the waitlist to be notified when it becomes available.
         </p>
         <button
