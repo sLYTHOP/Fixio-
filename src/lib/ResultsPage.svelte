@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
+  import { House } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -157,6 +158,7 @@
     class="absolute left-6 top-6 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
     style="border-color: var(--line); background: var(--surface); color: var(--ink);"
   >
+    <House size={16} strokeWidth={2} aria-hidden="true" />
     Back to home
   </button>
   {#if stage === 'done'}

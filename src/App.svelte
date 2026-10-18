@@ -36,8 +36,8 @@
   const tourSteps = [
     {
       selector: '[data-tour="resume-preview"]',
-      title: 'Your resume, with context',
-      description: 'We highlight the parts connected to the analysis. Hover over a highlight to see a suggested fix.',
+      title: 'Hover or tap red highlights to see fixes',
+      description: 'Each red area marks an issue in your resume. Hover over it or tap it to see the suggested fix.',
     },
     {
       selector: '[data-tour="issues"]',
