@@ -250,7 +250,7 @@
         {highlightWarning}
       </p>
     {/if}
-    <div bind:this={containerEl} class="resume-pages space-y-5 overflow-auto p-3 sm:p-5">
+    <div bind:this={containerEl} class="resume-pages space-y-5 p-3 sm:p-5">
       {#each pages as page (page.number)}
         <div
           class="resume-page relative mx-auto"
@@ -294,7 +294,6 @@
 
 <style>
   .resume-pages {
-    max-height: 78vh;
     background: #37383f;
   }
 
