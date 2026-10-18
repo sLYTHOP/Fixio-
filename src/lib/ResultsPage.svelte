@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -8,6 +8,8 @@
   export let user
   export let onHome = () => {}
   export let onRetry = () => {}
+  export let onHelp = () => {}
+  export let onTourReady = () => {}
 
   let stage = 'loading' // loading -> uploading -> processing -> done -> error
   let uploadError = ''
@@ -93,6 +95,8 @@
       }
       feedback = savedFeedback.result
       stage = 'done'
+      await tick()
+      onTourReady()
       return
     }
 
@@ -138,6 +142,8 @@
 
     feedback = data.result
     stage = 'done'
+    await tick()
+    onTourReady()
     trackEvent('feedback_shown', { role: roleMeta?.role })
   })
 
@@ -153,6 +159,17 @@
   >
     Back to home
   </button>
+  {#if stage === 'done'}
+    <button
+      type="button"
+      on:click={onHelp}
+      class="absolute right-6 top-6 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+      style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+      aria-label="Restart product tour"
+    >
+      Take a tour
+    </button>
+  {/if}
 
   {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
     <div class="flex w-full items-center justify-center">
@@ -202,7 +219,7 @@
           <ResumePreview file={resumeFile} issues={feedback.issues} bind:activeIssue />
 
           {#if feedback.strengths.length}
-            <section class="rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
+            <section data-tour="strengths" class="rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
               <h2 class="font-display font-semibold">What your resume already shows well</h2>
               <div class="mt-3 flex flex-wrap gap-2">
                 {#each feedback.strengths as strength}
@@ -216,7 +233,7 @@
         </div>
 
         <div class="space-y-6">
-          <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
+          <section data-tour="issues" class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <h2 class="font-display text-xl font-semibold">Issues found</h2>
@@ -255,7 +272,7 @@
           </section>
 
           {#if feedback.suggestions.length || feedback.issues.length}
-            <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
+            <section data-tour="next-steps" class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
               <h2 class="font-display font-semibold" style="color: var(--lime);">Suggested next steps</h2>
               <ul class="mt-3 space-y-2 text-sm leading-relaxed" style="color: var(--ink-soft);">
                 {#each feedback.suggestions as suggestion}
@@ -268,7 +285,7 @@
             </section>
           {/if}
 
-          <div class="rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
+          <div data-tour="roadmap" class="rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
             <p class="font-display font-semibold">Want a step-by-step plan to close these gaps?</p>
             <p class="mt-1 text-sm opacity-80">Courses, certifications, and projects — prioritized for you.</p>
             <button

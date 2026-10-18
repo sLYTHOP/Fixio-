@@ -21,6 +21,9 @@
   let lastNavigatedIssue = null
 
   $: visibleIssue = hoveredIssue ?? activeIssue
+  $: activeMark = visibleIssue === null
+    ? null
+    : marks.find((mark) => mark.issueIndex === visibleIssue) ?? null
 
   function normalizeText(text) {
     return text
@@ -217,7 +220,7 @@
   })
 </script>
 
-<div class="overflow-hidden rounded-2xl border" style="border-color: var(--line); background: var(--surface);">
+<div data-tour="resume-preview" class="overflow-hidden rounded-2xl border" style="border-color: var(--line); background: var(--surface);">
   <div class="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style="border-color: var(--line);">
     <div>
       <p class="font-display font-semibold">Your resume</p>
@@ -263,7 +266,7 @@
               class:active={visibleIssue === mark.issueIndex}
               class="resume-mark"
               style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px;"
-              aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}"
+              aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}. Suggested fix: {issues[mark.issueIndex].solution}"
               aria-pressed={activeIssue === mark.issueIndex}
               on:mouseenter={() => (hoveredIssue = mark.issueIndex)}
               on:mouseleave={() => (hoveredIssue = null)}
@@ -273,6 +276,16 @@
             ></button>
           {/each}
 
+          {#if activeMark?.pageNumber === page.number}
+            <div
+              class="solution-popover"
+              style="left: {Math.max(8, Math.min(activeMark.left, page.width - 296))}px; top: {Math.max(8, activeMark.top - 82)}px;"
+              role="status"
+            >
+              <p class="text-xs font-bold uppercase tracking-wide">Suggested fix</p>
+              <p class="mt-1 text-sm">{issues[activeMark.issueIndex].solution}</p>
+            </div>
+          {/if}
         </div>
       {/each}
     </div>
@@ -329,6 +342,18 @@
   .resume-mark:focus-visible {
     outline: 2px solid #218a31;
     outline-offset: 1px;
+  }
+
+  .solution-popover {
+    position: absolute;
+    z-index: 3;
+    width: min(280px, calc(100% - 16px));
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #8be65b;
+    color: #17210f;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 20%);
+    pointer-events: none;
   }
 
 </style>

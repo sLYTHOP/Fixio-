@@ -10,6 +10,7 @@
   import UploadPanel from './lib/UploadPanel.svelte'
   import RoleModal from './lib/RoleModal.svelte'
   import ResultsPage from './lib/ResultsPage.svelte'
+  import OnboardingTour from './lib/OnboardingTour.svelte'
   import { initAnalytics, identifyUser, trackEvent } from './lib/analytics.js'
   import { joinWaitlist, supabase, signOut } from './lib/supabase.js'
   import { stashPendingResume } from './lib/pendingResume.js'
@@ -30,6 +31,50 @@
   let waitlistNotice = ''
   let waitlistError = ''
   let savingWaitlist = false
+  let tourOpen = false
+
+  const tourSteps = [
+    {
+      selector: '[data-tour="resume-preview"]',
+      title: 'Your resume, with context',
+      description: 'We highlight the parts connected to the analysis. Hover over a highlight to see a suggested fix.',
+    },
+    {
+      selector: '[data-tour="issues"]',
+      title: 'Explore the issues',
+      description: 'Select an issue to jump to its location in your resume and highlight the matching passage.',
+    },
+    {
+      selector: '[data-tour="next-steps"]',
+      title: 'Turn feedback into action',
+      description: 'Find tailored recommendations and suggested fixes here.',
+    },
+    {
+      selector: '[data-tour="strengths"]',
+      title: 'See what is already working',
+      description: 'Your relevant strengths are collected here, so you know what to keep building on.',
+    },
+    {
+      selector: '[data-tour="roadmap"]',
+      title: 'Get a learning roadmap',
+      description: 'Join the waitlist if you want a step-by-step plan to close your skill gaps.',
+    },
+  ]
+
+  function startTour() {
+    tourOpen = true
+  }
+
+  function completeTour() {
+    tourOpen = false
+    if (user?.id) localStorage.setItem(`fixio_tour_completed_${user.id}`, 'true')
+  }
+
+  function startFirstTour() {
+    if (user?.id && localStorage.getItem(`fixio_tour_completed_${user.id}`) !== 'true') {
+      startTour()
+    }
+  }
 
   async function savePendingWaitlist(authenticatedUser) {
     const role = getPendingWaitlistRole()
@@ -166,7 +211,7 @@
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} />
 {:else}
   <main>
     <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
@@ -177,6 +222,7 @@
     <Footer />
   </main>
 {/if}
+<OnboardingTour open={tourOpen} steps={tourSteps} onComplete={completeTour} />
 {#if waitlistNotice || waitlistError}
   <div
     class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-3 text-sm font-medium shadow-lg"
