@@ -155,7 +155,7 @@
   <button
     type="button"
     on:click={onHome}
-    class="absolute left-6 top-6 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+    class="absolute left-6 top-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
     style="border-color: var(--line); background: var(--surface); color: var(--ink);"
   >
     <House size={16} strokeWidth={2} aria-hidden="true" />
@@ -288,15 +288,15 @@
           {/if}
 
           <div data-tour="roadmap" class="rounded-2xl p-6 text-center" style="background: var(--ink); color: var(--paper);">
-            <p class="font-display font-semibold">Want a step-by-step plan to close these gaps?</p>
-            <p class="mt-1 text-sm opacity-80">Courses, certifications, and projects — prioritized for you.</p>
+            <p class="font-display font-semibold">Want to close these skill gaps?</p>
+            <p class="mt-1 text-sm opacity-80">Get a personalised roadmap of courses, certifications, and projects, prioritised to help you prepare for your target role.</p>
             <button
               on:click={joinRoadmapWaitlist}
               disabled={waitlistClicked || waitlistSaving}
               class="mt-4 rounded-full px-6 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5 disabled:opacity-60"
               style="background: var(--lime); color: var(--paper);"
             >
-              {waitlistClicked ? "You're on the list!" : waitlistSaving ? 'Saving...' : 'Join the waitlist'}
+              {waitlistClicked ? "You're on the list!" : waitlistSaving ? 'Saving...' : 'Get My Roadmap'}
             </button>
             {#if waitlistError}
               <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
