@@ -219,7 +219,7 @@
           <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <h2 class="font-display text-xl font-semibold">Issues found &amp; solutions</h2>
+                <h2 class="font-display text-xl font-semibold">Issues found</h2>
                 <p class="mt-1 text-sm" style="color: var(--ink-soft);">
                   Select an issue to locate it in your resume.
                 </p>
@@ -244,9 +244,6 @@
                       {issue.section}
                     </span>
                     <span class="mt-1 block text-sm font-semibold">{issue.issue}</span>
-                    <span class="mt-2 block text-sm leading-relaxed" style="color: var(--ink-soft);">
-                      <span class="font-semibold" style="color: var(--lime);">Try this:</span> {issue.solution}
-                    </span>
                   </button>
                 {/each}
               </div>
@@ -257,12 +254,15 @@
             {/if}
           </section>
 
-          {#if feedback.suggestions.length}
+          {#if feedback.suggestions.length || feedback.issues.length}
             <section class="rounded-2xl border p-5 sm:p-6" style="border-color: var(--line); background: var(--surface);">
-              <h2 class="font-display font-semibold">Suggested next steps</h2>
+              <h2 class="font-display font-semibold" style="color: var(--lime);">Suggested next steps</h2>
               <ul class="mt-3 space-y-2 text-sm leading-relaxed" style="color: var(--ink-soft);">
                 {#each feedback.suggestions as suggestion}
                   <li>• {suggestion}</li>
+                {/each}
+                {#each feedback.issues as issue}
+                  <li>• {issue.solution}</li>
                 {/each}
               </ul>
             </section>
