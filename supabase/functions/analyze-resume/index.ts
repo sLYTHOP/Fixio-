@@ -4,6 +4,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2"
 import { parseFeedback, runWithFallback, type Attempt } from "./llm.ts"
+import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
 
 // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
 const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
@@ -104,8 +105,13 @@ Deno.serve(async (req) => {
     const base64 = btoa(binary)
 
     // 3. Build the prompt and call Claude
-    const systemPrompt = `You are Fixio's resume analyst. You evaluate a fresher's resume against a curated knowledge base of what the target role actually requires, built from real job descriptions and reviewed for accuracy.
+    const today = new Date().toISOString().slice(0, 10)
+    const kbItems = parseKnowledgeBase(kb.content)
+    const hasMustHaves = kbItems.some((i) => i.tier === "MH")
 
+    const systemPrompt = `You are Fixio's resume analyst. You evaluate a fresher's resume against a knowledge base of what the target role asks for. The knowledge base is built from real job postings. Items marked [PA#] come from practitioner input and are still pending review.
+
+Today's date: ${today}
 Target role: ${kb.role_label}
 Candidate level: ${level === "switcher" ? "career switcher" : "fresher"}
 
@@ -115,20 +121,27 @@ ${kb.content}
 ---
 
 Instructions:
-- Compare the resume against the knowledge base above. Identify genuine strengths (skills/experience clearly present and relevant), genuine gaps (things the knowledge base says matter that are missing or weak), and 2-4 concrete, actionable suggestions (specific certs, projects, or learning paths drawn from the knowledge base) to close those gaps.
-- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF.
-- Also flag up to 2 resume bullet points that read as vague or generic (lacking specifics like tools used, scale, or outcome). Never accuse the candidate of lying — just note the bullet could be more specific.
-- Be honest and specific. Do not pad the strengths list with things not actually supported by the resume text.
+- Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
+- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears).
+- Identify genuine strengths (clearly present and relevant) as short phrases of at most 12 words, and genuine gaps. Base gaps mainly on [MH#] and [SP#] items. Raise [NH#] or [PA#] items only when the resume shows no sign of them, and at most 2 such issues in total. Never present an [NH#] or [PA#] item as a major problem.
+- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF. Set kbItem to the ID of the knowledge base item the issue comes from (for example "MH6"), or null when the issue is about wording or clarity rather than a knowledge base item.
+- Where the resume is already strong in an area, say so under strengths and do not create an issue for it. Do not invent gaps to fill the output. Fewer real issues are better than many weak ones.
+- Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
+- Formatting: raise at most 1 formatting issue, and only for a real problem that would hurt shortlisting (for example unreadable sections or missing contact details).
+- Also flag up to 2 resume bullet points that read as vague or generic (lacking tools, scale or outcome). Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
+- Give 2-4 concrete suggestions (certs, projects, learning paths) drawn from the knowledge base to close the real gaps.
 - Respond with ONLY valid JSON, no prose before or after, in this exact shape:
 {
   "strengths": ["short phrase", "..."],
+  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null"}],
   "gaps": ["short phrase with a brief why-it-matters", "..."],
   "issues": [
     {
       "section": "exact resume section heading",
       "excerpt": "exact contiguous resume text, or null when the skill/detail is missing",
       "issue": "what is weak or missing and why it matters",
-      "solution": "a concrete, role-relevant way to improve it"
+      "solution": "a concrete, role-relevant way to improve it",
+      "kbItem": "ID of the knowledge base item, or null"
     }
   ],
   "suggestions": ["specific actionable suggestion", "..."],
@@ -145,7 +158,10 @@ Instructions:
 
     // Retries, model fallback and timeouts happen here, silently. The user just waits a bit longer.
     const llm = await runWithFallback(attempts, { systemPrompt, userText, pdfBase64: base64 }, {
-      validate: (text) => parseFeedback(text) !== null,
+      validate: (text) => {
+        const p = parseFeedback(text)
+        return p !== null && (!hasMustHaves || p.mustHaves.length > 0)
+      },
     })
     if (!llm.ok) {
       console.error("All model attempts failed:", llm.detail)
@@ -154,6 +170,7 @@ Instructions:
 
     const parsed = parseFeedback(llm.text)
     if (!parsed) return json({ ok: false, reason: "parse_error" })
+    const final = finalizeFeedback(parsed, kbItems)
 
     // 4. Persist the result so the user can revisit it later.
     const { error: saveError } = await supabase.from("feedback").insert({
@@ -161,14 +178,14 @@ Instructions:
       role,
       level,
       resume_path: resumePath,
-      result: { ...parsed, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
+      result: { ...final, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
     })
     if (saveError) {
       console.error("Failed to save feedback:", saveError)
       return json({ ok: false, reason: "feedback_save_error" }, 500)
     }
 
-    return json({ ok: true, result: parsed })
+    return json({ ok: true, result: final })
   } catch (e) {
     console.error(e)
     return json({ ok: false, reason: "unexpected_error" }, 500)

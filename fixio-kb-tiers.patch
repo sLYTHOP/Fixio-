@@ -1,0 +1,353 @@
+From 9be12ef83758f265514afa9837d6e58fe1a17568 Mon Sep 17 00:00:00 2001
+From: Fixio Dev <dev@fixio.local>
+Date: Sun, 18 Oct 2026 16:14:05 +0000
+Subject: [PATCH] feat: tiered knowledge base support: must-have count, source
+ label and priority per issue, today's date, no invented gaps; prompt no
+ longer claims expert review
+
+---
+ supabase/functions/analyze-resume/index.ts    | 35 +++++--
+ supabase/functions/analyze-resume/kb.ts       | 94 +++++++++++++++++++
+ supabase/functions/analyze-resume/kb_test.ts  | 69 ++++++++++++++
+ supabase/functions/analyze-resume/llm.ts      | 13 ++-
+ supabase/functions/analyze-resume/llm_test.ts |  6 +-
+ 5 files changed, 205 insertions(+), 12 deletions(-)
+ create mode 100644 supabase/functions/analyze-resume/kb.ts
+ create mode 100644 supabase/functions/analyze-resume/kb_test.ts
+
+diff --git a/supabase/functions/analyze-resume/index.ts b/supabase/functions/analyze-resume/index.ts
+index a167519..0c63948 100644
+--- a/supabase/functions/analyze-resume/index.ts
++++ b/supabase/functions/analyze-resume/index.ts
+@@ -4,6 +4,7 @@
+ 
+ import { createClient } from "npm:@supabase/supabase-js@2"
+ import { parseFeedback, runWithFallback, type Attempt } from "./llm.ts"
++import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
+ 
+ // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
+ const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
+@@ -104,8 +105,13 @@ Deno.serve(async (req) => {
+     const base64 = btoa(binary)
+ 
+     // 3. Build the prompt and call Claude
+-    const systemPrompt = `You are Fixio's resume analyst. You evaluate a fresher's resume against a curated knowledge base of what the target role actually requires, built from real job descriptions and reviewed for accuracy.
++    const today = new Date().toISOString().slice(0, 10)
++    const kbItems = parseKnowledgeBase(kb.content)
++    const hasMustHaves = kbItems.some((i) => i.tier === "MH")
+ 
++    const systemPrompt = `You are Fixio's resume analyst. You evaluate a fresher's resume against a knowledge base of what the target role asks for. The knowledge base is built from real job postings. Items marked [PA#] come from practitioner input and are still pending review.
++
++Today's date: ${today}
+ Target role: ${kb.role_label}
+ Candidate level: ${level === "switcher" ? "career switcher" : "fresher"}
+ 
+@@ -115,20 +121,27 @@ ${kb.content}
+ ---
+ 
+ Instructions:
+-- Compare the resume against the knowledge base above. Identify genuine strengths (skills/experience clearly present and relevant), genuine gaps (things the knowledge base says matter that are missing or weak), and 2-4 concrete, actionable suggestions (specific certs, projects, or learning paths drawn from the knowledge base) to close those gaps.
+-- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF.
+-- Also flag up to 2 resume bullet points that read as vague or generic (lacking specifics like tools used, scale, or outcome). Never accuse the candidate of lying — just note the bullet could be more specific.
+-- Be honest and specific. Do not pad the strengths list with things not actually supported by the resume text.
++- Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
++- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears).
++- Identify genuine strengths (clearly present and relevant) as short phrases of at most 12 words, and genuine gaps. Base gaps mainly on [MH#] and [SP#] items. Raise [NH#] or [PA#] items only when the resume shows no sign of them, and at most 2 such issues in total. Never present an [NH#] or [PA#] item as a major problem.
++- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF. Set kbItem to the ID of the knowledge base item the issue comes from (for example "MH6"), or null when the issue is about wording or clarity rather than a knowledge base item.
++- Where the resume is already strong in an area, say so under strengths and do not create an issue for it. Do not invent gaps to fill the output. Fewer real issues are better than many weak ones.
++- Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
++- Formatting: raise at most 1 formatting issue, and only for a real problem that would hurt shortlisting (for example unreadable sections or missing contact details).
++- Also flag up to 2 resume bullet points that read as vague or generic (lacking tools, scale or outcome). Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
++- Give 2-4 concrete suggestions (certs, projects, learning paths) drawn from the knowledge base to close the real gaps.
+ - Respond with ONLY valid JSON, no prose before or after, in this exact shape:
+ {
+   "strengths": ["short phrase", "..."],
++  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null"}],
+   "gaps": ["short phrase with a brief why-it-matters", "..."],
+   "issues": [
+     {
+       "section": "exact resume section heading",
+       "excerpt": "exact contiguous resume text, or null when the skill/detail is missing",
+       "issue": "what is weak or missing and why it matters",
+-      "solution": "a concrete, role-relevant way to improve it"
++      "solution": "a concrete, role-relevant way to improve it",
++      "kbItem": "ID of the knowledge base item, or null"
+     }
+   ],
+   "suggestions": ["specific actionable suggestion", "..."],
+@@ -145,7 +158,10 @@ Instructions:
+ 
+     // Retries, model fallback and timeouts happen here, silently. The user just waits a bit longer.
+     const llm = await runWithFallback(attempts, { systemPrompt, userText, pdfBase64: base64 }, {
+-      validate: (text) => parseFeedback(text) !== null,
++      validate: (text) => {
++        const p = parseFeedback(text)
++        return p !== null && (!hasMustHaves || p.mustHaves.length > 0)
++      },
+     })
+     if (!llm.ok) {
+       console.error("All model attempts failed:", llm.detail)
+@@ -154,6 +170,7 @@ Instructions:
+ 
+     const parsed = parseFeedback(llm.text)
+     if (!parsed) return json({ ok: false, reason: "parse_error" })
++    const final = finalizeFeedback(parsed, kbItems)
+ 
+     // 4. Persist the result so the user can revisit it later.
+     const { error: saveError } = await supabase.from("feedback").insert({
+@@ -161,14 +178,14 @@ Instructions:
+       role,
+       level,
+       resume_path: resumePath,
+-      result: { ...parsed, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
++      result: { ...final, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
+     })
+     if (saveError) {
+       console.error("Failed to save feedback:", saveError)
+       return json({ ok: false, reason: "feedback_save_error" }, 500)
+     }
+ 
+-    return json({ ok: true, result: parsed })
++    return json({ ok: true, result: final })
+   } catch (e) {
+     console.error(e)
+     return json({ ok: false, reason: "unexpected_error" }, 500)
+diff --git a/supabase/functions/analyze-resume/kb.ts b/supabase/functions/analyze-resume/kb.ts
+new file mode 100644
+index 0000000..40eddc8
+--- /dev/null
++++ b/supabase/functions/analyze-resume/kb.ts
+@@ -0,0 +1,94 @@
++// Reads the knowledge base text (items like "- [MH1] label (seen in 9 of 9 postings)") and turns
++// the model's answer into the final result: priority and source label on every issue, plus the
++// "N of M must-haves shown" summary. Counts and labels come from the knowledge base text, never
++// from the model, so the model cannot invent them.
++
++import type { Feedback } from "./llm.ts"
++
++export type Tier = "MH" | "SP" | "NH" | "PA"
++export type KbItem = { id: string; tier: Tier; label: string; basis: string }
++export type Priority = "high" | "medium" | "low"
++export type MustHaveStatus = "present" | "partial" | "missing" | "unknown"
++export type MustHaveSummary = {
++  total: number
++  shown: number   // clearly present, with a quote from the resume
++  partial: number // hinted at or weak
++  items: { id: string; label: string; status: MustHaveStatus; evidence: string | null }[]
++}
++export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority }
++export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves"> & {
++  issues: FinalIssue[]
++  mustHaveSummary: MustHaveSummary | null
++}
++
++// "- [MH6] Networking fundamentals: TCP/IP, DNS (seen in 6 of 9 postings)"
++const LINE = /^\s*[-*]\s*\[(MH|SP|NH|PA)(\d+)\]\s+(.+)\s\(([^()]+)\)\s*$/
++
++export function parseKnowledgeBase(content: string): KbItem[] {
++  const items: KbItem[] = []
++  const seen = new Set<string>()
++  for (const line of content.split("\n")) {
++    const m = line.match(LINE)
++    if (!m) continue
++    const id = m[1] + m[2]
++    if (seen.has(id)) continue
++    seen.add(id)
++    items.push({ id, tier: m[1] as Tier, label: m[3].trim(), basis: m[4].trim() })
++  }
++  return items
++}
++
++export function priorityFor(tier: Tier): Priority {
++  return tier === "MH" ? "high" : tier === "SP" ? "medium" : "low"
++}
++
++const STATUSES = new Set(["present", "partial", "missing"])
++
++export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves"]): MustHaveSummary | null {
++  const must = kb.filter((i) => i.tier === "MH")
++  if (!must.length) return null
++
++  const byId = new Map<string, { status: MustHaveStatus; evidence: string | null }>()
++  for (const r of reported) {
++    if (!STATUSES.has(r.status)) continue
++    let status = r.status as MustHaveStatus
++    // "Present" needs a quote from the resume. No quote means we cannot call it present.
++    if (status === "present" && !r.evidence) status = "partial"
++    byId.set(r.id.toUpperCase(), { status, evidence: r.evidence })
++  }
++
++  const items = must.map((m) => {
++    const got = byId.get(m.id)
++    return { id: m.id, label: m.label, status: got?.status ?? ("unknown" as MustHaveStatus), evidence: got?.evidence ?? null }
++  })
++  return {
++    total: items.length,
++    shown: items.filter((i) => i.status === "present").length,
++    partial: items.filter((i) => i.status === "partial").length,
++    items,
++  }
++}
++
++export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
++  const byId = new Map(kb.map((i) => [i.id, i]))
++  const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
++
++  const issues: FinalIssue[] = parsed.issues
++    .map((it, index) => {
++      const item = it.kbItem ? byId.get(it.kbItem) : undefined
++      const final: FinalIssue = {
++        ...it,
++        kbItem: item ? item.id : null,
++        // No matching item: the issue is about wording or clarity. Without any knowledge base
++        // items at all (an older knowledge base), do not label the source.
++        basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
++        priority: item ? priorityFor(item.tier) : "medium",
++      }
++      return { final, index }
++    })
++    .sort((a, b) => rank[a.final.priority] - rank[b.final.priority] || a.index - b.index)
++    .map((x) => x.final)
++
++  const { mustHaves, issues: _drop, ...rest } = parsed
++  return { ...rest, issues, mustHaveSummary: buildMustHaveSummary(kb, mustHaves) }
++}
+diff --git a/supabase/functions/analyze-resume/kb_test.ts b/supabase/functions/analyze-resume/kb_test.ts
+new file mode 100644
+index 0000000..9f27cd7
+--- /dev/null
++++ b/supabase/functions/analyze-resume/kb_test.ts
+@@ -0,0 +1,69 @@
++// Run: deno test kb_test.ts
++import { buildMustHaveSummary, finalizeFeedback, parseKnowledgeBase, priorityFor } from "./kb.ts"
++import type { Feedback } from "./llm.ts"
++
++const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
++
++const KB = `# Title
++## MUST-HAVE
++- [MH1] SIEM familiarity and alert monitoring (seen in 9 of 9 postings)
++- [MH2] Alert triage and incident response basics: classify, escalate (seen in 8 of 9 postings)
++- [MH3] Core security concepts (attack types, malware) (seen in 8 of 9 postings)
++- [SP1] Security tools: EDR/XDR, firewalls (required in 4 of 9 postings, an advantage in 2 more)
++- [NH3] Hands-on practice (seen in 2 of 9 postings)
++  Note for reviewers on NH3: not an item line.
++- [PA1] Windows event log basics (practitioner-added, pending review)
++- [MH1] duplicate id is ignored (seen in 1 of 9 postings)
++Not a list line (seen in 3 of 9 postings)
++- plain bullet without id (seen in 3 of 9 postings)`
++
++Deno.test("parses ids, tiers, labels and basis", () => {
++  const kb = parseKnowledgeBase(KB)
++  assert(kb.map((i) => i.id).join() === "MH1,MH2,MH3,SP1,NH3,PA1", "ids in order, duplicate and non-items skipped")
++  assert(kb[2].label === "Core security concepts (attack types, malware)" && kb[2].basis === "seen in 8 of 9 postings", "label keeps its own brackets")
++  assert(kb[3].basis === "required in 4 of 9 postings, an advantage in 2 more", "basis taken from the text")
++  assert(kb[5].tier === "PA" && kb[5].basis === "practitioner-added, pending review", "practitioner-added kept apart")
++})
++
++Deno.test("priority by tier", () => {
++  assert(priorityFor("MH") === "high" && priorityFor("SP") === "medium" && priorityFor("NH") === "low" && priorityFor("PA") === "low", "tiers map")
++})
++
++Deno.test("must-have summary counts", () => {
++  const kb = parseKnowledgeBase(KB)
++  const s = buildMustHaveSummary(kb, [
++    { id: "MH1", status: "present", evidence: "Splunk alerts" },
++    { id: "MH2", status: "present", evidence: null },   // no quote: cannot be present
++    { id: "MH3", status: "banana", evidence: "x" },     // invalid status: ignored
++    { id: "SP1", status: "present", evidence: "EDR" },  // not a must-have: ignored
++  ])!
++  assert(s.total === 3 && s.shown === 1 && s.partial === 1, "1 of 3 shown, 1 partial")
++  assert(s.items[1].status === "partial" && s.items[2].status === "unknown", "downgrade and unknown")
++})
++
++Deno.test("no must-haves in the knowledge base -> no summary", () => {
++  assert(buildMustHaveSummary(parseKnowledgeBase("- [SP1] x (seen in 1 of 9 postings)"), []) === null, "null")
++  assert(buildMustHaveSummary([], []) === null, "empty kb")
++})
++
++const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
++  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves })
++const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
++
++Deno.test("issues get source label and priority, sorted high to low", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(base([issue("NH3", "a"), issue("MH2", "b"), issue(null, "c"), issue("PA1", "d"), issue("SP1", "e"), issue("ZZ9", "f")]), kb)
++  const order = out.issues.map((i) => i.priority + ":" + i.section).join(" ")
++  assert(order === "high:b medium:c medium:e medium:f low:a low:d", "sorted by priority, original order kept inside a tier: " + order)
++  const mh2 = out.issues.find((i) => i.kbItem === "MH2")!
++  assert(mh2.basis === "seen in 8 of 9 postings", "basis from the knowledge base text")
++  const unknown = out.issues.find((i) => i.section === "f")!
++  assert(unknown.kbItem === null && unknown.basis === "general practice, not from the job postings", "unknown id treated as general")
++  assert(out.issues.find((i) => i.kbItem === "PA1")!.basis === "practitioner-added, pending review", "PA labelled")
++  assert(!("mustHaves" in out), "raw mustHaves not passed on")
++})
++
++Deno.test("older knowledge base without ids: no false source label", () => {
++  const out = finalizeFeedback(base([issue(null)]), parseKnowledgeBase("plain text knowledge base"))
++  assert(out.issues[0].basis === null && out.issues[0].priority === "medium" && out.mustHaveSummary === null, "unlabelled")
++})
+diff --git a/supabase/functions/analyze-resume/llm.ts b/supabase/functions/analyze-resume/llm.ts
+index 2152619..fbfc2ce 100644
+--- a/supabase/functions/analyze-resume/llm.ts
++++ b/supabase/functions/analyze-resume/llm.ts
+@@ -16,7 +16,8 @@ export type Feedback = {
+   strengths: string[]
+   gaps: string[]
+   suggestions: string[]
+-  issues: { section: string; excerpt: string | null; issue: string; solution: string }[]
++  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null }[]
++  mustHaves: { id: string; status: string; evidence: string | null }[]
+   vagueBullets: { original: string; suggestion: string }[]
+ }
+ 
+@@ -68,7 +69,7 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
+     { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+     {
+       model: o.model,
+-      max_tokens: 3500,
++      max_tokens: 4500,
+       system: o.systemPrompt,
+       messages: [{
+         role: "user",
+@@ -251,8 +252,16 @@ export function parseFeedback(text: string): Feedback | null {
+         excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
+         issue: item.issue.trim(),
+         solution: item.solution.trim(),
++        kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
+       }))
+       .filter((item: { section: string; issue: string; solution: string }) => item.section && item.issue && item.solution),
++    mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
++      .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
++      .map((m: any) => ({
++        id: m.id.trim().toUpperCase(),
++        status: m.status.trim().toLowerCase(),
++        evidence: typeof m.evidence === "string" && m.evidence.trim() ? m.evidence.trim() : null,
++      })),
+     vagueBullets: vague
+       .filter((b: any) => b && typeof b.original === "string" && typeof b.suggestion === "string")
+       .slice(0, 2)
+diff --git a/supabase/functions/analyze-resume/llm_test.ts b/supabase/functions/analyze-resume/llm_test.ts
+index 1ecfdaf..c7a01c4 100644
+--- a/supabase/functions/analyze-resume/llm_test.ts
++++ b/supabase/functions/analyze-resume/llm_test.ts
+@@ -152,11 +152,15 @@ Deno.test("request shapes unchanged", async () => {
+   assert(seen.body.contents[0].parts[0].inlineData.mimeType === "application/pdf", "pdf attached")
+   assert(buildGeminiBody({ ...plan }).generationConfig.responseMimeType === "application/json", "json mode")
+   await callClaude({ apiKey: "KEY", model: "cm", ...plan }, (async (_u: unknown, init?: RequestInit) => { seen = JSON.parse(init!.body as string); return claudeOk(GOOD) }) as typeof fetch)
+-  assert(seen.model === "cm" && seen.max_tokens === 3500 && seen.messages[0].content[0].type === "document", "claude body")
++  assert(seen.model === "cm" && seen.max_tokens === 4500 && seen.messages[0].content[0].type === "document", "claude body")
+ })
+ 
+ Deno.test("parseFeedback (including the issues rules)", () => {
+   assert(parseFeedback(GOOD)?.issues.length === 1, "valid with issues")
++  const withKb = parseFeedback(JSON.stringify({ strengths: ["a"], gaps: ["g"], issues: [{ section: "S", excerpt: null, issue: "i", solution: "s", kbItem: " mh6 " }], mustHaves: [{ id: "mh1", status: "Present", evidence: " quote " }, { id: 5 }, null] }))
++  assert(withKb?.issues[0].kbItem === "MH6", "kbItem cleaned and upper-cased")
++  assert(withKb?.mustHaves.length === 1 && withKb.mustHaves[0].id === "MH1" && withKb.mustHaves[0].status === "present" && withKb.mustHaves[0].evidence === "quote", "mustHaves cleaned, junk dropped")
++  assert(parseFeedback(GOOD)?.issues[0].kbItem === null && parseFeedback(GOOD)?.mustHaves.length === 0, "new fields default safely")
+   assert(parseFeedback("```json\n" + GOOD + "\n```") !== null, "fenced json")
+   assert(parseFeedback('{"strengths":["a"]}')?.gaps.length === 0, "missing fields default to []")
+   assert(parseFeedback('{"strengths":["a"],"gaps":["g"]}') === null, "gaps without issues is rejected")
+-- 
+2.43.0
+

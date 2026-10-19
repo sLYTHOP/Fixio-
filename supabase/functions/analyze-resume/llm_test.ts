@@ -152,11 +152,15 @@ Deno.test("request shapes unchanged", async () => {
   assert(seen.body.contents[0].parts[0].inlineData.mimeType === "application/pdf", "pdf attached")
   assert(buildGeminiBody({ ...plan }).generationConfig.responseMimeType === "application/json", "json mode")
   await callClaude({ apiKey: "KEY", model: "cm", ...plan }, (async (_u: unknown, init?: RequestInit) => { seen = JSON.parse(init!.body as string); return claudeOk(GOOD) }) as typeof fetch)
-  assert(seen.model === "cm" && seen.max_tokens === 3500 && seen.messages[0].content[0].type === "document", "claude body")
+  assert(seen.model === "cm" && seen.max_tokens === 4500 && seen.messages[0].content[0].type === "document", "claude body")
 })
 
 Deno.test("parseFeedback (including the issues rules)", () => {
   assert(parseFeedback(GOOD)?.issues.length === 1, "valid with issues")
+  const withKb = parseFeedback(JSON.stringify({ strengths: ["a"], gaps: ["g"], issues: [{ section: "S", excerpt: null, issue: "i", solution: "s", kbItem: " mh6 " }], mustHaves: [{ id: "mh1", status: "Present", evidence: " quote " }, { id: 5 }, null] }))
+  assert(withKb?.issues[0].kbItem === "MH6", "kbItem cleaned and upper-cased")
+  assert(withKb?.mustHaves.length === 1 && withKb.mustHaves[0].id === "MH1" && withKb.mustHaves[0].status === "present" && withKb.mustHaves[0].evidence === "quote", "mustHaves cleaned, junk dropped")
+  assert(parseFeedback(GOOD)?.issues[0].kbItem === null && parseFeedback(GOOD)?.mustHaves.length === 0, "new fields default safely")
   assert(parseFeedback("```json\n" + GOOD + "\n```") !== null, "fenced json")
   assert(parseFeedback('{"strengths":["a"]}')?.gaps.length === 0, "missing fields default to []")
   assert(parseFeedback('{"strengths":["a"],"gaps":["g"]}') === null, "gaps without issues is rejected")

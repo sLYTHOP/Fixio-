@@ -16,7 +16,8 @@ export type Feedback = {
   strengths: string[]
   gaps: string[]
   suggestions: string[]
-  issues: { section: string; excerpt: string | null; issue: string; solution: string }[]
+  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null }[]
+  mustHaves: { id: string; status: string; evidence: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
 
@@ -68,7 +69,7 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
     { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     {
       model: o.model,
-      max_tokens: 3500,
+      max_tokens: 4500,
       system: o.systemPrompt,
       messages: [{
         role: "user",
@@ -251,8 +252,16 @@ export function parseFeedback(text: string): Feedback | null {
         excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
         issue: item.issue.trim(),
         solution: item.solution.trim(),
+        kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
       }))
       .filter((item: { section: string; issue: string; solution: string }) => item.section && item.issue && item.solution),
+    mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
+      .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
+      .map((m: any) => ({
+        id: m.id.trim().toUpperCase(),
+        status: m.status.trim().toLowerCase(),
+        evidence: typeof m.evidence === "string" && m.evidence.trim() ? m.evidence.trim() : null,
+      })),
     vagueBullets: vague
       .filter((b: any) => b && typeof b.original === "string" && typeof b.suggestion === "string")
       .slice(0, 2)
