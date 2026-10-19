@@ -42,6 +42,13 @@
     })
   }
 
+  function handlePurchaseDialogKeydown(event) {
+    if (event.key === 'Escape' && purchaseClicked) {
+      event.stopPropagation()
+      purchaseClicked = false
+    }
+  }
+
   async function registerStudentInterest() {
     if (interestSaving || interestSaved) return
     if (!user?.email) {
@@ -194,6 +201,8 @@
   onDestroy(() => clearInterval(phraseTimer))
 </script>
 
+<svelte:window on:keydown={handlePurchaseDialogKeydown} />
+
 <section class="relative min-h-screen px-6 {stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error' ? 'flex items-center justify-center py-6' : 'py-32'}">
   <button
     type="button"
@@ -315,29 +324,6 @@
               >
                 Buy for ₹199
               </button>
-              {#if purchaseClicked}
-                <div class="mt-5 rounded-xl border p-4" style="border-color: var(--line); background: var(--paper);">
-                  {#if interestSaved}
-                    <p class="text-sm font-medium" role="status">Thanks for your interest. We’ll let you know when the roadmap is ready.</p>
-                  {:else}
-                    <p class="text-sm leading-relaxed">
-                      We’re working on this feature. Good to know you’re interested in buying our product. Click “Interested” and we’ll let you know when it’s ready.
-                    </p>
-                    <button
-                      type="button"
-                      on:click={registerStudentInterest}
-                      disabled={interestSaving}
-                      class="mt-4 w-full rounded-full border px-5 py-2.5 font-display text-sm font-semibold transition-colors hover:bg-[var(--surface-2)] disabled:opacity-60"
-                      style="border-color: var(--line); color: var(--ink);"
-                    >
-                      {interestSaving ? 'Saving...' : 'Interested'}
-                    </button>
-                  {/if}
-                  {#if interestError}
-                    <p class="mt-3 text-sm" role="alert" style="color: var(--coral);">{interestError}</p>
-                  {/if}
-                </div>
-              {/if}
             </section>
 
             <section class="flex flex-col rounded-2xl border p-6 sm:p-8" style="border-color: var(--line); background: var(--surface);">
@@ -366,6 +352,59 @@
               </a>
             </section>
           </div>
+
+          {#if purchaseClicked}
+            <div
+              class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-4 sm:items-center sm:px-6 sm:py-6"
+              style="background: color-mix(in srgb, var(--ink) 45%, transparent);"
+              on:click={() => (purchaseClicked = false)}
+              role="presentation"
+            >
+              <div
+                class="relative my-auto w-full max-w-md rounded-2xl border p-6 shadow-2xl sm:p-8"
+                on:click|stopPropagation
+                on:keydown={handlePurchaseDialogKeydown}
+                role="dialog"
+                tabindex="-1"
+                aria-modal="true"
+                aria-labelledby="roadmap-interest-title"
+                style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+              >
+                <button
+                  type="button"
+                  on:click={() => (purchaseClicked = false)}
+                  aria-label="Close"
+                  class="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold hover:bg-[var(--surface-2)]"
+                >
+                  ✕
+                </button>
+
+                {#if interestSaved}
+                  <h2 id="roadmap-interest-title" class="pr-8 font-display text-2xl font-bold">Thanks for your interest!</h2>
+                  <p class="mt-3 text-sm leading-relaxed" role="status" style="color: var(--ink-soft);">
+                    We’ll let you know when the roadmap is ready.
+                  </p>
+                {:else}
+                  <h2 id="roadmap-interest-title" class="pr-8 font-display text-2xl font-bold">Coming soon</h2>
+                  <p class="mt-3 text-sm leading-relaxed" style="color: var(--ink-soft);">
+                    We’re working on this feature. Good to know you’re interested in buying our product. Click “Interested” and we’ll let you know when it’s ready.
+                  </p>
+                  <button
+                    type="button"
+                    on:click={registerStudentInterest}
+                    disabled={interestSaving}
+                    class="mt-6 w-full rounded-full px-5 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+                    style="background: var(--lime); color: var(--paper);"
+                  >
+                    {interestSaving ? 'Saving...' : 'Interested'}
+                  </button>
+                {/if}
+                {#if interestError}
+                  <p class="mt-3 text-sm" role="alert" style="color: var(--coral);">{interestError}</p>
+                {/if}
+              </div>
+            </div>
+          {/if}
 
         </div>
       </div>
