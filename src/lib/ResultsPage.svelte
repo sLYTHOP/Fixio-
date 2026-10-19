@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
-  import { House } from '@lucide/svelte'
+  import { ArrowLeft, House } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -17,24 +17,67 @@
   let roleMeta = null
   let resumeFile = null
   let activeIssue = null
-  let waitlistClicked = false
-  let waitlistSaving = false
-  let waitlistError = ''
+  let paymentPageOpen = false
+  let purchaseClicked = false
+  let interestSaving = false
+  let interestSaved = false
+  let interestError = ''
+  let feedback = null // real result from analyze-resume: { strengths, gaps, suggestions, vagueBullets }
 
-  async function joinRoadmapWaitlist() {
-    waitlistSaving = true
-    waitlistError = ''
-    const { error } = await joinWaitlist({ email: user.email, role: roleMeta?.role, source: 'roadmap_interest', userId: user.id })
-    waitlistSaving = false
-    if (error) {
-      console.error(error)
-      waitlistError = "Couldn't save that. Please try again."
+  function openPaymentPage() {
+    paymentPageOpen = true
+    purchaseClicked = false
+    trackEvent('roadmap_checkout_viewed', { role: roleMeta?.role, source: 'results_page' })
+  }
+
+  function recordStudentPurchaseClick() {
+    purchaseClicked = true
+    interestSaved = false
+    interestError = ''
+    trackEvent('roadmap_purchase_clicked', {
+      plan: 'student',
+      price_inr: 199,
+      role: roleMeta?.role,
+      source: 'roadmap_checkout',
+    })
+  }
+
+  async function registerStudentInterest() {
+    if (interestSaving || interestSaved) return
+    if (!user?.email) {
+      interestError = "We couldn't find an email address for your account. Please try another Google account."
       return
     }
-    waitlistClicked = true
-    trackEvent('roadmap_interest_clicked', { role: roleMeta?.role, source: 'results_page' })
+
+    interestSaving = true
+    interestError = ''
+
+    const { error } = await joinWaitlist({
+      email: user.email,
+      role: roleMeta?.role,
+      source: 'roadmap_purchase_interest',
+      userId: user.id,
+    })
+
+    interestSaving = false
+    if (error) {
+      console.error('[ResultsPage] failed to save roadmap purchase interest', error)
+      interestError = "We couldn't save your interest. Please try again."
+      return
+    }
+
+    interestSaved = true
+    trackEvent('roadmap_purchase_interest_confirmed', {
+      plan: 'student',
+      price_inr: 199,
+      role: roleMeta?.role,
+      source: 'roadmap_checkout',
+    })
   }
-  let feedback = null // real result from analyze-resume: { strengths, gaps, suggestions, vagueBullets }
+
+  function trackCollegeContact() {
+    trackEvent('roadmap_plan_selected', { plan: 'college', role: roleMeta?.role })
+  }
 
   const phrases = [
     "Alright, let's see what we've got here...",
@@ -208,7 +251,126 @@
     </div>
 
   {:else if stage === 'done'}
-    <div class="max-w-7xl mx-auto">
+    {#if paymentPageOpen}
+      <div class="max-w-7xl mx-auto">
+        <div class="mx-auto max-w-4xl pt-10">
+          <button
+            type="button"
+            on:click={() => (paymentPageOpen = false)}
+            class="mb-8 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+            style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+          >
+            <ArrowLeft size={16} strokeWidth={2} aria-hidden="true" />
+            Back to your results
+          </button>
+
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.18em]" style="color: var(--lime);">Fixio Roadmap</p>
+            <h1 class="mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">Checkout</h1>
+            <p class="mt-2 text-sm leading-relaxed" style="color: var(--ink-soft);">
+              Choose the roadmap that fits you.
+            </p>
+          </div>
+
+          <div class="mt-8 grid gap-5 md:grid-cols-2">
+            <section class="flex flex-col rounded-2xl border p-6 sm:p-8" style="border-color: var(--lime); background: var(--surface);">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--lime);">For students</p>
+                  <h2 class="mt-2 font-display text-2xl font-bold">Portfolio Roadmap</h2>
+                </div>
+              </div>
+
+              <div class="mt-6 flex items-baseline gap-2">
+                <span class="font-display text-4xl font-extrabold">₹199</span>
+                <span class="text-sm" style="color: var(--ink-soft);">INR</span>
+              </div>
+              <p class="mt-3 text-sm leading-relaxed" style="color: var(--ink-soft);">
+                A prioritised roadmap to help you build a strong portfolio and improve your chances of getting more interviews.
+              </p>
+              <div class="mt-5 rounded-xl border p-4" style="border-color: var(--line); background: var(--paper);">
+                <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-soft);">Order summary</p>
+                <div class="mt-3 flex items-center justify-between gap-3 text-sm">
+                  <span>Student Portfolio Roadmap</span>
+                  <span class="font-semibold">₹199</span>
+                </div>
+                {#if user?.email}
+                  <div class="mt-3 border-t pt-3 text-xs" style="border-color: var(--line); color: var(--ink-soft);">
+                    Account: {user.email}
+                  </div>
+                {/if}
+              </div>
+
+              <ul class="mt-6 flex-1 space-y-3 text-sm">
+                <li class="flex gap-2"><span style="color: var(--lime);" aria-hidden="true">✓</span>Personalised learning priorities</li>
+                <li class="flex gap-2"><span style="color: var(--lime);" aria-hidden="true">✓</span>Portfolio-building project guidance</li>
+                <li class="flex gap-2"><span style="color: var(--lime);" aria-hidden="true">✓</span>Recommendations matched to your target role</li>
+              </ul>
+
+              <button
+                type="button"
+                on:click={recordStudentPurchaseClick}
+                class="mt-8 w-full rounded-full px-6 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5"
+                style="background: var(--lime); color: var(--paper);"
+              >
+                Buy for ₹199
+              </button>
+              {#if purchaseClicked}
+                <div class="mt-5 rounded-xl border p-4" style="border-color: var(--line); background: var(--paper);">
+                  {#if interestSaved}
+                    <p class="text-sm font-medium" role="status">Thanks for your interest. We’ll let you know when the roadmap is ready.</p>
+                  {:else}
+                    <p class="text-sm leading-relaxed">
+                      We’re working on this feature. Good to know you’re interested in buying our product. Click “Interested” and we’ll let you know when it’s ready.
+                    </p>
+                    <button
+                      type="button"
+                      on:click={registerStudentInterest}
+                      disabled={interestSaving}
+                      class="mt-4 w-full rounded-full border px-5 py-2.5 font-display text-sm font-semibold transition-colors hover:bg-[var(--surface-2)] disabled:opacity-60"
+                      style="border-color: var(--line); color: var(--ink);"
+                    >
+                      {interestSaving ? 'Saving...' : 'Interested'}
+                    </button>
+                  {/if}
+                  {#if interestError}
+                    <p class="mt-3 text-sm" role="alert" style="color: var(--coral);">{interestError}</p>
+                  {/if}
+                </div>
+              {/if}
+            </section>
+
+            <section class="flex flex-col rounded-2xl border p-6 sm:p-8" style="border-color: var(--line); background: var(--surface);">
+              <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--indigo);">For colleges</p>
+              <h2 class="mt-2 font-display text-2xl font-bold">Campus Plan</h2>
+              <div class="mt-6">
+                <span class="font-display text-2xl font-bold">Custom pricing</span>
+              </div>
+              <p class="mt-3 text-sm leading-relaxed" style="color: var(--ink-soft);">
+                Help your students build stronger portfolios with role-focused roadmaps at scale.
+              </p>
+
+              <ul class="mt-6 flex-1 space-y-3 text-sm">
+                <li class="flex gap-2"><span style="color: var(--indigo);" aria-hidden="true">✓</span>Roadmaps for your student community</li>
+                <li class="flex gap-2"><span style="color: var(--indigo);" aria-hidden="true">✓</span>Designed around career-ready skills</li>
+                <li class="flex gap-2"><span style="color: var(--indigo);" aria-hidden="true">✓</span>Talk with us about your requirements</li>
+              </ul>
+
+              <a
+                href="mailto:samuelfernandis25@gmail.com?subject=Fixio%20college%20roadmap%20pricing"
+                on:click={trackCollegeContact}
+                class="mt-8 block w-full rounded-full border px-6 py-3 text-center font-display text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+                style="border-color: var(--line); color: var(--ink);"
+              >
+                Contact us for pricing
+              </a>
+            </section>
+          </div>
+
+        </div>
+      </div>
+    {:else}
+      <div class="max-w-7xl mx-auto">
       <h1 class="font-display text-3xl font-bold tracking-tight">
         Alright {firstName}, here's how you match up{roleMeta?.role ? ` for ${roleMeta.role}` : ''}
       </h1>
@@ -291,16 +453,13 @@
             <p class="font-display font-semibold">Want to close these skill gaps?</p>
             <p class="mt-1 text-sm opacity-80">Get a personalised roadmap of courses, certifications, and projects, prioritised to help you prepare for your target role.</p>
             <button
-              on:click={joinRoadmapWaitlist}
-              disabled={waitlistClicked || waitlistSaving}
-              class="mt-4 rounded-full px-6 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+              type="button"
+              on:click={openPaymentPage}
+              class="mt-4 rounded-full px-6 py-3 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5"
               style="background: var(--lime); color: var(--paper);"
             >
-              {waitlistClicked ? "You're on the list!" : waitlistSaving ? 'Saving...' : 'Get My Roadmap'}
+              Get My Roadmap
             </button>
-            {#if waitlistError}
-              <p class="mt-2 text-xs" style="color: var(--coral);">{waitlistError}</p>
-            {/if}
           </div>
 
           <div class="rounded-2xl border p-6" style="border-color: var(--line); background: var(--surface);">
@@ -320,6 +479,7 @@
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    {/if}
   {/if}
 </section>

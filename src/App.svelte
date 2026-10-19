@@ -57,7 +57,7 @@
     {
       selector: '[data-tour="roadmap"]',
       title: 'Get a learning roadmap',
-      description: 'Join the waitlist if you want a step-by-step plan to close your skill gaps.',
+      description: 'Explore roadmap options for a step-by-step plan to close your skill gaps.',
     },
   ]
 
