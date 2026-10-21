@@ -72,6 +72,7 @@
 
   function startFirstTour() {
     if (user?.id && localStorage.getItem(`fixio_tour_completed_${user.id}`) !== 'true') {
+      localStorage.setItem(`fixio_tour_completed_${user.id}`, 'true')
       startTour()
     }
   }
