@@ -67,11 +67,29 @@
 
   function completeTour() {
     tourOpen = false
-    if (user?.id) localStorage.setItem(`fixio_tour_completed_${user.id}`, 'true')
+    if (!user?.id) return
+
+    localStorage.setItem(`fixio_tour_completed_${user.id}`, 'true')
+    void persistTourCompletion()
+  }
+
+  async function persistTourCompletion() {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: { fixio_tour_completed: true },
+      })
+      if (error) console.error('[App] failed to save tour completion', error)
+    } catch (error) {
+      console.error('[App] failed to save tour completion', error)
+    }
   }
 
   function startFirstTour() {
-    if (user?.id && localStorage.getItem(`fixio_tour_completed_${user.id}`) !== 'true') {
+    if (
+      user?.id &&
+      user.user_metadata?.fixio_tour_completed !== true &&
+      localStorage.getItem(`fixio_tour_completed_${user.id}`) !== 'true'
+    ) {
       localStorage.setItem(`fixio_tour_completed_${user.id}`, 'true')
       startTour()
     }
