@@ -11,6 +11,7 @@
   export let onRetry = () => {}
   export let onHelp = () => {}
   export let onTourReady = () => {}
+  export let onSignOut = () => {}
 
   let stage = 'loading' // loading -> uploading -> processing -> done -> error
   let uploadError = ''
@@ -204,26 +205,38 @@
 <svelte:window on:keydown={handlePurchaseDialogKeydown} />
 
 <section class="relative min-h-screen px-6 {stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error' ? 'flex items-center justify-center py-6' : 'py-32'}">
-  <button
-    type="button"
-    on:click={onHome}
-    class="absolute left-6 top-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
-    style="border-color: var(--line); background: var(--surface); color: var(--ink);"
-  >
-    <House size={16} strokeWidth={2} aria-hidden="true" />
-    Back to home
-  </button>
-  {#if stage === 'done'}
+  <div class="absolute inset-x-6 top-6 flex flex-wrap items-center justify-between gap-3">
     <button
       type="button"
-      on:click={onHelp}
-      class="absolute right-6 top-6 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+      on:click={onHome}
+      class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
       style="border-color: var(--line); background: var(--surface); color: var(--ink);"
-      aria-label="Restart product tour"
     >
-      Take a tour
+      <House size={16} strokeWidth={2} aria-hidden="true" />
+      Back to home
     </button>
-  {/if}
+    <div class="flex items-center gap-3">
+      {#if stage === 'done'}
+        <button
+          type="button"
+          on:click={onHelp}
+          class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+          style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+          aria-label="Restart product tour"
+        >
+          Take a tour
+        </button>
+      {/if}
+      <button
+        type="button"
+        on:click={onSignOut}
+        class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+        style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+      >
+        Sign out
+      </button>
+    </div>
+  </div>
 
   {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
     <div class="flex w-full items-center justify-center">

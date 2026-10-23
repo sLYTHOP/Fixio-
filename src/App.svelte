@@ -212,7 +212,7 @@
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} onSignOut={signOut} />
 {:else}
   <main>
     <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
