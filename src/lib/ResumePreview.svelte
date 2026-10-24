@@ -231,7 +231,7 @@
       target="_blank"
       rel="noreferrer"
       class="text-xs font-semibold underline underline-offset-4"
-      style="color: var(--lime);"
+      style="color: var(--accent, var(--lime));"
     >
       Open original
     </a>
@@ -240,7 +240,7 @@
   {#if loadError}
     <p class="p-5 text-sm" style="color: var(--ink-soft);">
       {loadError}
-      <a href={fileUrl} target="_blank" rel="noreferrer" class="ml-1 font-semibold underline" style="color: var(--lime);">Open PDF</a>
+      <a href={fileUrl} target="_blank" rel="noreferrer" class="ml-1 font-semibold underline" style="color: var(--accent, var(--lime));">Open PDF</a>
     </p>
   {:else if !pages.length}
     <p class="p-5 text-sm" style="color: var(--ink-soft);">Loading resume preview...</p>
@@ -294,7 +294,7 @@
 
 <style>
   .resume-pages {
-    background: #37383f;
+    background: var(--resume-canvas, #37383f);
   }
 
   .resume-page {
@@ -336,11 +336,11 @@
   }
 
   .resume-mark.active {
-    background: rgb(137 232 79 / 55%);
+    background: rgb(255 145 92 / 58%);
   }
 
   .resume-mark:focus-visible {
-    outline: 2px solid #218a31;
+    outline: 2px solid var(--accent, #218a31);
     outline-offset: 1px;
   }
 
@@ -348,10 +348,11 @@
     position: absolute;
     z-index: 3;
     width: min(280px, calc(100% - 16px));
+    border: 1px solid var(--line, transparent);
     border-radius: 10px;
     padding: 10px 12px;
-    background: #8be65b;
-    color: #17210f;
+    background: var(--surface, #8be65b);
+    color: var(--ink, #17210f);
     box-shadow: 0 4px 14px rgb(0 0 0 / 20%);
     pointer-events: none;
   }

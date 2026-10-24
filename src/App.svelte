@@ -46,14 +46,14 @@
       description: 'Select an issue to jump to its location in your resume and highlight the matching passage.',
     },
     {
-      selector: '[data-tour="next-steps"]',
-      title: 'Turn feedback into action',
-      description: 'Find tailored recommendations and suggested fixes here.',
-    },
-    {
       selector: '[data-tour="strengths"]',
       title: 'See what is already working',
       description: 'Your relevant strengths are collected here, so you know what to keep building on.',
+    },
+    {
+      selector: '[data-tour="next-steps"]',
+      title: 'Turn feedback into action',
+      description: 'Find tailored recommendations and suggested fixes here.',
     },
     {
       selector: '[data-tour="roadmap"]',

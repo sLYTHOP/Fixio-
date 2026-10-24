@@ -45,7 +45,7 @@
         maxlength="2000"
         rows="4"
         placeholder="Tell us what you think..."
-        class="w-full resize-y rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--lime)]"
+        class="w-full resize-y rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:border-[var(--accent,var(--lime))]"
         style="border-color: var(--line); background: var(--surface); color: var(--ink);"
       ></textarea>
       <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -58,13 +58,13 @@
           type="submit"
           disabled={(!!user && !user.email) || !message.trim() || saving}
           class="rounded-full px-5 py-2.5 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
-          style="background: var(--lime); color: var(--paper);"
+          style="background: var(--lime); color: #202126;"
         >
           {saving ? 'Submitting...' : 'Submit feedback'}
         </button>
       </div>
       {#if submitted}
-        <p class="mt-3 text-sm" role="status" style="color: var(--lime);">Thanks for your feedback!</p>
+        <p class="mt-3 text-sm" role="status" style="color: var(--accent, var(--lime));">Thanks for your feedback!</p>
       {/if}
       {#if errorMessage}
         <p class="mt-3 text-sm" role="alert" style="color: var(--coral);">{errorMessage}</p>
