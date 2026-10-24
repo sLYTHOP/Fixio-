@@ -11,6 +11,7 @@
   export let onHome = () => {}
   export let onRetry = () => {}
   export let onHelp = () => {}
+  export let onSignOut = () => {}
   export let onTourReady = () => {}
 
   let stage = 'loading' // loading -> uploading -> processing -> done -> error
@@ -215,17 +216,27 @@
       <House size={16} strokeWidth={2} aria-hidden="true" />
       Back to home
     </button>
-    {#if stage === 'done' && !paymentPageOpen}
+    <div class="flex items-center gap-3">
       <button
         type="button"
-        on:click={onHelp}
+        on:click={onSignOut}
         class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
         style="border-color: var(--line); background: var(--surface); color: var(--ink);"
-        aria-label="Restart product tour"
       >
-        Take a tour
+        Sign out
       </button>
-    {/if}
+      {#if stage === 'done' && !paymentPageOpen}
+        <button
+          type="button"
+          on:click={onHelp}
+          class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
+          style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+          aria-label="Restart product tour"
+        >
+          Take a tour
+        </button>
+      {/if}
+    </div>
   </div>
 
   {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}

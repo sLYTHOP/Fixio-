@@ -233,7 +233,7 @@
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onSignOut={signOut} onTourReady={startFirstTour} />
 {:else if view === 'authenticating'}
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
     <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
