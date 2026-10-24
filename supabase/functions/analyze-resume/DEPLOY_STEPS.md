@@ -17,19 +17,20 @@ npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-your-real-key-here
 (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected by Supabase, no need to set those)
 
-## 5. Deploy the function
-npx supabase functions deploy analyze-resume
-
-Deploy again whenever `index.ts` or `llm.ts` changes. The results page now reads
-the structured `issues` entries returned by this function to annotate the resume
-and pair each gap with a solution.
-
-## 6. Apply the database migration
+## 5. Apply the database migration
 npx supabase db push
 
-This applies pending migrations, including the policies for reading saved feedback
-and the authenticated waitlist table used by the role sign-up flow. The analysis
-is stored in the existing `feedback` table and is shown again when the user signs in.
+This applies pending migrations, including the policies for reading saved feedback,
+the authenticated waitlist table, and the key used to reuse identical resume analyses.
+The analysis is stored in the existing `feedback` table and is shown again when the user signs in.
+
+## 6. Deploy the function
+npx supabase functions deploy analyze-resume
+
+Apply the migration before deploying the updated function, because the function
+looks up the analysis key in the `feedback` table. Deploy again whenever `index.ts`
+or `llm.ts` changes. The results page reads the structured `issues` entries returned
+by this function to annotate the resume and pair each gap with a solution.
 
 ## 7. Confirm it's live
 Check Supabase dashboard -> Edge Functions -> you should see "analyze-resume" listed.

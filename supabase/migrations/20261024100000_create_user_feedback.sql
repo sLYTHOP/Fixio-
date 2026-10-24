@@ -11,6 +11,9 @@ alter table public.user_feedback enable row level security;
 grant insert on public.user_feedback to authenticated;
 grant insert on public.user_feedback to anon;
 
+drop policy if exists "Authenticated users can submit their own feedback"
+  on public.user_feedback;
+
 create policy "Authenticated users can submit their own feedback"
   on public.user_feedback
   for insert
@@ -19,6 +22,9 @@ create policy "Authenticated users can submit their own feedback"
     user_id = auth.uid()
     and lower(email) = lower(auth.jwt() ->> 'email')
   );
+
+drop policy if exists "Visitors can submit anonymous feedback"
+  on public.user_feedback;
 
 create policy "Visitors can submit anonymous feedback"
   on public.user_feedback

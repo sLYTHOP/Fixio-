@@ -20,6 +20,13 @@ const CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+// Bump when analysis prompt or output semantics change.
+const ANALYSIS_VERSION = "1"
+
+async function sha256Hex(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
 
 function buildAttempts(): Attempt[] {
   const gemini = (): Attempt[] =>
@@ -66,15 +73,6 @@ Deno.serve(async (req) => {
     // Users may only analyze files inside their own storage folder.
     if (!resumePath.startsWith(`${authedUser.id}/`)) return json({ ok: false, reason: "forbidden" }, 403)
 
-    // Per-user daily cap.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    const { count } = await supabase
-      .from("feedback")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", authedUser.id)
-      .gte("created_at", since)
-    if ((count ?? 0) >= DAILY_LIMIT) return json({ ok: false, reason: "rate_limited" })
-
     // 1. Look up the knowledge base entry for this role
     const roleKey = slugify(role)
     const { data: kb, error: kbError } = await supabase
@@ -100,6 +98,43 @@ Deno.serve(async (req) => {
 
     const arrayBuffer = await fileBlob.arrayBuffer()
     const bytes = new Uint8Array(arrayBuffer)
+    const resumeFingerprint = await sha256Hex(bytes)
+    const knowledgeBaseFingerprint = await sha256Hex(new TextEncoder().encode(kb.content))
+    const normalizedLevel = level === "switcher" ? "switcher" : "fresher"
+    const analysisKey = await sha256Hex(new TextEncoder().encode(JSON.stringify({
+      resumeFingerprint,
+      roleKey,
+      level: normalizedLevel,
+      knowledgeBaseFingerprint,
+      analysisVersion: ANALYSIS_VERSION,
+    })))
+
+    // Reuse an exact-file analysis for this user and these analysis inputs.
+    const { data: matchingFeedback, error: lookupError } = await supabase
+      .from("feedback")
+      .select("result")
+      .eq("user_id", authedUser.id)
+      .eq("analysis_key", analysisKey)
+      .maybeSingle()
+    if (lookupError) {
+      console.error("Failed to look up reusable feedback:", lookupError)
+      return json({ ok: false, reason: "feedback_lookup_error" }, 500)
+    }
+    if (matchingFeedback) return json({ ok: true, result: matchingFeedback.result, reused: true })
+
+    // Reused analyses do not consume the per-user daily scan limit.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const { count, error: countError } = await supabase
+      .from("feedback")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", authedUser.id)
+      .gte("created_at", since)
+    if (countError) {
+      console.error("Failed to check the daily scan limit:", countError)
+      return json({ ok: false, reason: "rate_limit_check_error" }, 500)
+    }
+    if ((count ?? 0) >= DAILY_LIMIT) return json({ ok: false, reason: "rate_limited" })
+
     let binary = ""
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
     const base64 = btoa(binary)
@@ -178,9 +213,22 @@ Instructions:
       role,
       level,
       resume_path: resumePath,
+      analysis_key: analysisKey,
       result: { ...final, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
     })
     if (saveError) {
+      if (saveError.code === "23505") {
+        const { data: existingFeedback, error: lookupError } = await supabase
+          .from("feedback")
+          .select("result")
+          .eq("user_id", authedUser.id)
+          .eq("analysis_key", analysisKey)
+          .maybeSingle()
+        if (!lookupError && existingFeedback) {
+          return json({ ok: true, result: existingFeedback.result, reused: true })
+        }
+        if (lookupError) console.error("Failed to load concurrently saved feedback:", lookupError)
+      }
       console.error("Failed to save feedback:", saveError)
       return json({ ok: false, reason: "feedback_save_error" }, 500)
     }
