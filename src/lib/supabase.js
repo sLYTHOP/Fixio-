@@ -43,6 +43,14 @@ export async function getLatestFeedback(userId) {
     .maybeSingle()
 }
 
+export async function submitUserFeedback({ userId, email, message }) {
+  return supabase.from('user_feedback').insert({
+    user_id: userId,
+    email: email.trim().toLowerCase(),
+    message: message.trim(),
+  })
+}
+
 export async function downloadResume(path) {
   return supabase.storage.from('resumes').download(path)
 }

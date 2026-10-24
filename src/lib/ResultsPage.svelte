@@ -4,6 +4,7 @@
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
+  import FeedbackSection from './FeedbackSection.svelte'
   import ResumePreview from './ResumePreview.svelte'
 
   export let user
@@ -11,7 +12,6 @@
   export let onRetry = () => {}
   export let onHelp = () => {}
   export let onTourReady = () => {}
-  export let onSignOut = () => {}
 
   let stage = 'loading' // loading -> uploading -> processing -> done -> error
   let uploadError = ''
@@ -215,27 +215,17 @@
       <House size={16} strokeWidth={2} aria-hidden="true" />
       Back to home
     </button>
-    <div class="flex items-center gap-3">
-      {#if stage === 'done'}
-        <button
-          type="button"
-          on:click={onHelp}
-          class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
-          style="border-color: var(--line); background: var(--surface); color: var(--ink);"
-          aria-label="Restart product tour"
-        >
-          Take a tour
-        </button>
-      {/if}
+    {#if stage === 'done' && !paymentPageOpen}
       <button
         type="button"
-        on:click={onSignOut}
+        on:click={onHelp}
         class="rounded-full border px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)]"
         style="border-color: var(--line); background: var(--surface); color: var(--ink);"
+        aria-label="Restart product tour"
       >
-        Sign out
+        Take a tour
       </button>
-    </div>
+    {/if}
   </div>
 
   {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
@@ -533,5 +523,8 @@
       </div>
       </div>
     {/if}
+  {/if}
+  {#if stage === 'done'}
+    <FeedbackSection {user} />
   {/if}
 </section>

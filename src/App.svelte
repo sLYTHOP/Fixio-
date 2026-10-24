@@ -10,6 +10,7 @@
   import UploadPanel from './lib/UploadPanel.svelte'
   import RoleModal from './lib/RoleModal.svelte'
   import ResultsPage from './lib/ResultsPage.svelte'
+  import FeedbackSection from './lib/FeedbackSection.svelte'
   import OnboardingTour from './lib/OnboardingTour.svelte'
   import { initAnalytics, identifyUser, trackEvent } from './lib/analytics.js'
   import { joinWaitlist, supabase, signOut } from './lib/supabase.js'
@@ -25,7 +26,7 @@
   let uploadError = ''
   let roleModalOpen = false
   let signInModalOpen = false
-  let view = 'landing' // 'landing' | 'results'
+  let view = 'landing' // 'landing' | 'authenticating' | 'results'
   let pendingFile = null // held in memory between upload and role questionnaire
   let waitlistRole = ''
   let waitlistNotice = ''
@@ -192,6 +193,7 @@
     if (user) {
       view = 'results'
     } else {
+      view = 'authenticating'
       signInModalOpen = true
     }
   }
@@ -209,6 +211,7 @@
     signInModalOpen = false
     clearPendingWaitlistRole()
     waitlistRole = ''
+    if (view === 'authenticating') view = 'landing'
   }
 
   function retryWaitlistSave() {
@@ -230,14 +233,21 @@
 </script>
 
 {#if view === 'results' && user}
-  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} onSignOut={signOut} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onTourReady={startFirstTour} />
+{:else if view === 'authenticating'}
+  <main class="flex min-h-screen items-center justify-center px-6 text-center">
+    <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
+  </main>
 {:else}
   <main>
-    <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
+    {#if !roleModalOpen}
+      <Nav {user} onSignIn={openSignInDirect} onSignOut={signOut} />
+    {/if}
     <Hero onGetStarted={openUploadFlow} />
     <WhyFixio />
     <HowItWorks />
     <Pricing onGetStarted={openUploadFlow} />
+    <FeedbackSection {user} />
     <Footer />
   </main>
 {/if}
