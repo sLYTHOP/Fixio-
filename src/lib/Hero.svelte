@@ -35,29 +35,29 @@
   }
 </script>
 
-<section id="top" class="relative pt-40 pb-28 px-6 overflow-hidden">
+<section id="top" class="relative overflow-hidden px-6 pb-24 pt-36 sm:pt-40">
   <!-- ambient glow, not a flat page -->
   <div
     class="absolute inset-x-0 top-0 h-[560px] -z-10"
     style="background: radial-gradient(55% 55% at 30% 0%, color-mix(in srgb, var(--lime) 8%, transparent), transparent 70%);"
   ></div>
 
-  <div class="max-w-6xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
-    <div class="text-center lg:text-left">
-      <h1 class="font-display text-5xl sm:text-6xl font-extrabold tracking-tight leading-[1.02]">
+  <div class="mx-auto flex max-w-4xl flex-col items-center text-center">
+    <div>
+      <h1 class="font-display text-5xl font-extrabold tracking-tight leading-[1.02] sm:text-6xl lg:text-7xl">
         Let's get you<br />a job<span style="color: var(--lime);">!</span>
       </h1>
-      <p class="mt-6 text-lg max-w-md mx-auto lg:mx-0" style="color: var(--ink-soft);">
+      <p class="mx-auto mt-6 max-w-2xl text-lg sm:text-xl" style="color: var(--ink-soft);">
         Everyone chases an ATS score. We show you what's actually missing:
         the skills, projects and certs recruiters expect, so you close real gaps.
       </p>
 
-      <div class="mt-9 flex flex-col sm:flex-row items-center lg:items-start justify-center lg:justify-start gap-4">
-        <div class="flex flex-col items-center lg:items-start gap-2">
+      <div class="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+        <div class="flex flex-col items-center gap-2">
           <button
             on:click={() => handleClick('hero_primary')}
-            class="flex flex-col items-center justify-center rounded-full px-7 py-3 font-display transition-all hover:-translate-y-0.5 hover:shadow-lg"
-            style="background: var(--lime); color: var(--paper);"
+            class="flex min-h-14 flex-col items-center justify-center rounded-full px-8 py-3 font-display transition-all hover:-translate-y-0.5 hover:shadow-lg"
+            style="background: var(--lime); color: #202126;"
           >
             <span class="text-base font-semibold leading-tight">Upload resume</span>
             <span class="mt-0.5 text-xs font-medium leading-tight">PDF only, up to 5 MB</span>
@@ -65,7 +65,7 @@
         </div>
         <button
           on:click={scrollToHowItWorks}
-          class="font-display font-semibold text-base px-7 py-4 rounded-full border transition-colors hover:bg-[var(--surface)]"
+          class="rounded-full border px-7 py-4 font-display text-base font-semibold transition-colors hover:bg-[var(--surface)]"
           style="border-color: var(--line); color: var(--ink);"
         >
           See how it works
@@ -73,11 +73,11 @@
       </div>
     </div>
 
-    <!-- evidence window: what the actual output looks like -->
-    <div class="relative flex justify-center lg:justify-end">
+    <!-- Evidence window: what the actual output looks like -->
+    <div class="relative mt-14 flex w-full justify-center sm:mt-16">
       <div
         bind:this={windowEl}
-        class="relative z-10 w-full max-w-md rounded-2xl border shadow-xl overflow-hidden"
+        class="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border shadow-xl"
         style="border-color: var(--line); background: var(--surface);"
       >
         <div class="flex items-center gap-2 px-4 py-3 border-b" style="border-color: var(--line); background: var(--surface-2);">
