@@ -10,15 +10,15 @@
 
   async function submitFeedback() {
     const trimmedMessage = message.trim()
-    if (!user?.id || !user.email || !trimmedMessage || saving) return
+    if ((user && (!user.id || !user.email)) || !trimmedMessage || saving) return
 
     saving = true
     submitted = false
     errorMessage = ''
 
     const { error } = await submitUserFeedback({
-      userId: user.id,
-      email: user.email,
+      userId: user?.id,
+      email: user?.email,
       message: trimmedMessage,
     })
 
@@ -49,14 +49,14 @@
         style="border-color: var(--line); background: var(--surface); color: var(--ink);"
       ></textarea>
       <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-        {#if !user?.email}
-          <p class="text-sm" style="color: var(--ink-soft);">Sign in to submit feedback.</p>
+        {#if user?.email}
+          <p class="text-sm" style="color: var(--ink-soft);">Submitting as {user.email}</p>
         {:else}
-          <p class="text-sm" style="color: var(--ink-soft);">Submitted as {user.email}</p>
+          <p class="text-sm" style="color: var(--ink-soft);">You can submit feedback without signing in.</p>
         {/if}
         <button
           type="submit"
-          disabled={!user?.email || !message.trim() || saving}
+          disabled={(!!user && !user.email) || !message.trim() || saving}
           class="rounded-full px-5 py-2.5 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
           style="background: var(--lime); color: var(--paper);"
         >

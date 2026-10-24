@@ -45,8 +45,8 @@ export async function getLatestFeedback(userId) {
 
 export async function submitUserFeedback({ userId, email, message }) {
   return supabase.from('user_feedback').insert({
-    user_id: userId,
-    email: email.trim().toLowerCase(),
+    user_id: userId || null,
+    email: email?.trim().toLowerCase() || null,
     message: message.trim(),
   })
 }
