@@ -61,6 +61,34 @@
     return [...new Set(itemIndexes.slice(start, end))]
   }
 
+  function mergeAdjacentMarks(marks) {
+    const mergedMarks = []
+
+    for (const mark of marks) {
+      const markCenter = mark.top + mark.height / 2
+      const adjacentMark = mergedMarks.find((candidate) => {
+        if (candidate.issueIndex !== mark.issueIndex || candidate.pageNumber !== mark.pageNumber) return false
+        const candidateCenter = candidate.top + candidate.height / 2
+        const sameLine = Math.abs(candidateCenter - markCenter) <= Math.min(candidate.height, mark.height) * 0.5
+        const touchesHorizontally = mark.left <= candidate.left + candidate.width + 3
+          && mark.left + mark.width >= candidate.left - 3
+        return sameLine && touchesHorizontally
+      })
+
+      if (adjacentMark) {
+        const left = Math.min(adjacentMark.left, mark.left)
+        const top = Math.min(adjacentMark.top, mark.top)
+        const right = Math.max(adjacentMark.left + adjacentMark.width, mark.left + mark.width)
+        const bottom = Math.max(adjacentMark.top + adjacentMark.height, mark.top + mark.height)
+        Object.assign(adjacentMark, { left, top, width: right - left, height: bottom - top })
+      } else {
+        mergedMarks.push({ ...mark })
+      }
+    }
+
+    return mergedMarks
+  }
+
   function cancelRendering() {
     renderTasks.forEach((task) => task.cancel())
     renderTasks = []
@@ -140,16 +168,16 @@
             issueIndex,
             pageNumber: page.number,
             left: rect.left - pageRect.left,
-            top: rect.top - pageRect.top,
+            top: rect.top - pageRect.top + rect.height * 0.1,
             width: rect.width,
-            height: rect.height,
+            height: rect.height * 0.8,
           })
         })
       })
     }
 
     if (generation === renderGeneration) {
-      marks = nextMarks
+      marks = mergeAdjacentMarks(nextMarks)
       const matchedIssues = new Set(nextMarks.map((mark) => mark.issueIndex))
       if (issues.some((_, index) => !matchedIssues.has(index))) {
         highlightWarning = 'Some sections could not be matched to selectable text in this PDF. Every finding and solution is still listed alongside the preview.'
@@ -221,16 +249,16 @@
 </script>
 
 <div data-tour="resume-preview" class="overflow-hidden rounded-2xl border" style="border-color: var(--line); background: var(--surface);">
-  <div class="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style="border-color: var(--line);">
+  <div class="resume-preview-header flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style="border-color: var(--line);">
     <div>
-      <p class="font-display font-semibold">Your resume</p>
-      <p class="mt-0.5 text-xs" style="color: var(--ink-soft);">Hover or tap a red highlight to locate an issue</p>
+      <p class="resume-preview-title font-display font-semibold">Your resume</p>
+      <p class="resume-preview-hint mt-0.5" style="color: var(--ink-soft);">Hover or tap a red highlight to locate an issue</p>
     </div>
     <a
       href={fileUrl}
       target="_blank"
       rel="noreferrer"
-      class="text-xs font-semibold underline underline-offset-4"
+      class="resume-preview-original font-semibold underline underline-offset-4"
       style="color: var(--accent, var(--lime));"
     >
       Open original
@@ -355,6 +383,21 @@
     color: var(--ink, #17210f);
     box-shadow: 0 4px 14px rgb(0 0 0 / 20%);
     pointer-events: none;
+  }
+
+  @media (min-width: 1100px) {
+    .resume-preview-header {
+      padding: 16px 20px;
+    }
+
+    .resume-preview-title {
+      font-size: 16px;
+    }
+
+    .resume-preview-hint,
+    .resume-preview-original {
+      font-size: 13px;
+    }
   }
 
 </style>

@@ -644,6 +644,13 @@
     margin: 0 auto;
   }
 
+  @media (min-width: 1100px) {
+    .results-header-inner,
+    .results-main {
+      width: min(1440px, calc(100% - 80px));
+    }
+  }
+
   .results-header-inner {
     height: 100%;
     display: flex;
@@ -1408,6 +1415,114 @@
 
   .results-page :global(.solution-popover p:first-child) {
     color: var(--accent);
+  }
+
+  @media (min-width: 1100px) {
+    .intro-copy {
+      font-size: 15px;
+    }
+
+    .role-chip {
+      padding: 12px 15px;
+      font-size: 12px;
+    }
+
+    .role-chip span {
+      font-size: 11px;
+    }
+
+    .review-summary {
+      min-height: 80px;
+      padding: 15px 20px;
+    }
+
+    .summary-copy h2 {
+      font-size: 14px;
+    }
+
+    .summary-copy p {
+      font-size: 13px;
+    }
+
+    .summary-strengths {
+      font-size: 11px;
+    }
+
+    .summary-strengths strong {
+      font-size: 15px;
+    }
+
+    .review-layout {
+      grid-template-columns: minmax(0, 1.18fr) minmax(350px, .82fr);
+      gap: 20px;
+    }
+
+    .issues-card {
+      padding: 20px;
+    }
+
+    .section-heading h2,
+    .strengths-card h2,
+    .next-steps-heading h2,
+    .roadmap-copy h2 {
+      font-size: 15px;
+    }
+
+    .section-heading p,
+    .next-steps-heading p,
+    .roadmap-copy p {
+      font-size: 11px;
+    }
+
+    .note-count {
+      font-size: 10px;
+    }
+
+    .issue-card-item {
+      padding: 12px 14px;
+    }
+
+    .issue-number {
+      font-size: 10px;
+    }
+
+    .issue-section {
+      font-size: 10px;
+    }
+
+    .issue-title,
+    .issue-detail {
+      font-size: 12px;
+    }
+
+    .solution-label {
+      font-size: 9px;
+    }
+
+    .strengths-card h2 {
+      font-size: 13px;
+    }
+
+    .strength-tag {
+      font-size: 11px;
+    }
+
+    .next-steps-list li {
+      font-size: 11px;
+    }
+
+    .step-number {
+      font-size: 9px;
+    }
+
+    .primary-button,
+    .secondary-button {
+      font-size: 13px;
+    }
+
+    .review-disclaimer {
+      font-size: 10px;
+    }
   }
 
   @media (max-width: 900px) {
