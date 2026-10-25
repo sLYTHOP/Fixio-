@@ -454,7 +454,6 @@
         <div>
           <p class="eyebrow"><span class="eyebrow-dot"></span> Resume review complete</p>
           <h1>{firstName ? `Here's your review, ${firstName}` : 'Your resume review is ready'}</h1>
-          <p class="intro-copy">Explore the notes below, then use the suggestions to strengthen your resume.</p>
         </div>
         {#if roleMeta?.role || roleMeta?.level}
           <div class="role-chip">
@@ -474,11 +473,6 @@
         </span>
         <div class="summary-copy">
           <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
-          <p>
-            {feedback.issues.length
-              ? 'Select a review note to see where it applies and what you can improve.'
-              : 'Your resume has no specific issues from this review. Explore your strengths and suggestions below.'}
-          </p>
         </div>
         <div class="summary-strengths">
           <strong>{feedback.strengths.length}</strong>
@@ -496,7 +490,6 @@
             <div class="section-heading">
               <div>
                 <h2>Review notes</h2>
-                <p>Select a note to locate it in your resume and read the suggested fix.</p>
               </div>
               <span class="note-count">
                 {feedback.issues.length} {feedback.issues.length === 1 ? 'note' : 'notes'}
@@ -551,8 +544,7 @@
           <div class="next-steps-heading">
             <span class="next-steps-icon" aria-hidden="true">↗</span>
             <div>
-              <h2>Make your next edit count</h2>
-              <p>Start with these practical next steps.</p>
+              <h2>Suggestions</h2>
             </div>
           </div>
           <ol class="next-steps-list">
@@ -574,7 +566,6 @@
                   ? 'Want a complete plan beyond these suggestions?'
                   : 'Want a complete plan for your target role?'}
               </h2>
-              <p>Explore a personalised roadmap for building the skills behind your target role.</p>
             </div>
           </div>
           <button type="button" on:click={openPaymentPage} class="primary-button">
@@ -845,7 +836,6 @@
     line-height: 1.12;
   }
 
-  .intro-copy,
   .checkout-description {
     margin: 0;
     color: var(--ink-soft);
@@ -913,13 +903,6 @@
     font-weight: 700;
   }
 
-  .summary-copy p {
-    margin: 0;
-    color: var(--ink-soft);
-    font-size: 11px;
-    line-height: 1.5;
-  }
-
   .summary-strengths {
     min-width: 78px;
     padding-left: 15px;
@@ -978,15 +961,6 @@
     font-size: 13px;
     font-weight: 700;
     letter-spacing: -.01em;
-  }
-
-  .section-heading p,
-  .next-steps-heading p,
-  .roadmap-copy p {
-    margin: 5px 0 0;
-    color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.5;
   }
 
   .note-count {
@@ -1191,8 +1165,8 @@
   .roadmap-followup {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 24px;
+    justify-content: flex-start;
+    gap: 20px;
     margin-top: 18px;
     padding: 18px;
     border: 1px solid var(--line);
@@ -1205,20 +1179,13 @@
     display: flex;
     align-items: center;
     gap: 11px;
+    flex: 0 1 auto;
   }
 
   .roadmap-copy h2 {
     margin: 0;
     font-size: 13px;
     font-weight: 700;
-  }
-
-  .roadmap-copy p {
-    max-width: 600px;
-    margin: 5px 0 0;
-    color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.5;
   }
 
   .primary-button,
@@ -1432,10 +1399,6 @@
   }
 
   @media (min-width: 1100px) {
-    .intro-copy {
-      font-size: 15px;
-    }
-
     .role-chip {
       padding: 12px 15px;
       font-size: 12px;
@@ -1452,10 +1415,6 @@
 
     .summary-copy h2 {
       font-size: 14px;
-    }
-
-    .summary-copy p {
-      font-size: 13px;
     }
 
     .summary-strengths {
@@ -1480,12 +1439,6 @@
     .next-steps-heading h2,
     .roadmap-copy h2 {
       font-size: 15px;
-    }
-
-    .section-heading p,
-    .next-steps-heading p,
-    .roadmap-copy p {
-      font-size: 11px;
     }
 
     .note-count {
@@ -1535,10 +1488,6 @@
 
     .roadmap-copy h2 {
       font-size: 14px;
-    }
-
-    .roadmap-copy p {
-      font-size: 12px;
     }
 
     .primary-button,

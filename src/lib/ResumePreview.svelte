@@ -252,7 +252,6 @@
   <div class="resume-preview-header flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style="border-color: var(--line);">
     <div>
       <p class="resume-preview-title font-display font-semibold">Your resume</p>
-      <p class="resume-preview-hint mt-0.5" style="color: var(--ink-soft);">Hover or tap a red highlight to locate an issue</p>
     </div>
     <a
       href={fileUrl}
@@ -394,7 +393,6 @@
       font-size: 16px;
     }
 
-    .resume-preview-hint,
     .resume-preview-original {
       font-size: 13px;
     }
