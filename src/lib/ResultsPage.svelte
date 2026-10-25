@@ -546,37 +546,41 @@
         </div>
       </section>
 
-          {#if feedback.suggestions.length || feedback.issues.length}
-            <section data-tour="next-steps" class="review-card next-steps-card">
-              <div class="next-steps-heading">
-                <span class="next-steps-icon" aria-hidden="true">↗</span>
-                <div>
-                  <h2>Make your next edit count</h2>
-                  <p>Start with these practical next steps.</p>
-                </div>
-              </div>
-              <ol class="next-steps-list">
-                {#each feedback.suggestions as suggestion, i}
-                  <li><span class="step-number">{String(i + 1).padStart(2, '0')}</span><span>{suggestion}</span></li>
-                {/each}
-                {#each feedback.issues as issue, i}
-                  <li><span class="step-number">{String(feedback.suggestions.length + i + 1).padStart(2, '0')}</span><span>{issue.solution}</span></li>
-                {/each}
-              </ol>
-            </section>
-          {/if}
-
-      <section data-tour="roadmap" class="roadmap-card">
-        <div class="roadmap-copy">
-          <span class="roadmap-icon" aria-hidden="true">↗</span>
-          <div>
-            <h2>Want a step-by-step plan?</h2>
-            <p>Explore a personalised roadmap for building the skills behind your target role.</p>
+      <section data-tour="next-steps" class="review-card next-steps-card">
+        {#if feedback.suggestions.length || feedback.issues.length}
+          <div class="next-steps-heading">
+            <span class="next-steps-icon" aria-hidden="true">↗</span>
+            <div>
+              <h2>Make your next edit count</h2>
+              <p>Start with these practical next steps.</p>
+            </div>
           </div>
+          <ol class="next-steps-list">
+            {#each feedback.suggestions as suggestion, i}
+              <li><span class="step-number">{String(i + 1).padStart(2, '0')}</span><span>{suggestion}</span></li>
+            {/each}
+            {#each feedback.issues as issue, i}
+              <li><span class="step-number">{String(feedback.suggestions.length + i + 1).padStart(2, '0')}</span><span>{issue.solution}</span></li>
+            {/each}
+          </ol>
+        {/if}
+
+        <div data-tour="roadmap" class="roadmap-followup">
+          <div class="roadmap-copy">
+            <span class="roadmap-icon" aria-hidden="true">↗</span>
+            <div>
+              <h2>
+                {feedback.suggestions.length || feedback.issues.length
+                  ? 'Want a complete plan beyond these suggestions?'
+                  : 'Want a complete plan for your target role?'}
+              </h2>
+              <p>Explore a personalised roadmap for building the skills behind your target role.</p>
+            </div>
+          </div>
+          <button type="button" on:click={openPaymentPage} class="primary-button">
+            Explore roadmap <span aria-hidden="true">→</span>
+          </button>
         </div>
-        <button type="button" on:click={openPaymentPage} class="primary-button">
-          Explore roadmap <span aria-hidden="true">→</span>
-        </button>
       </section>
       <p class="review-disclaimer">Your review is guidance to help you improve—not a hiring decision.</p>
     {/if}
@@ -1132,7 +1136,7 @@
 
   .next-steps-card {
     margin-top: 17px;
-    padding: 17px;
+    padding: 20px;
   }
 
   .next-steps-heading {
@@ -1156,55 +1160,65 @@
   }
 
   .next-steps-list {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin: 13px 0 0;
+    display: block;
+    margin: 14px 0 0;
     padding: 0;
     list-style: none;
   }
 
   .next-steps-list li {
     display: flex;
-    align-items: flex-start;
-    gap: 7px;
-    min-height: 57px;
-    padding: 9px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--surface-2);
+    align-items: baseline;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
     color: var(--ink-soft);
     font-size: 9px;
     line-height: 1.5;
   }
 
+  .next-steps-list li:last-child {
+    border-bottom: 0;
+  }
+
   .step-number {
-    flex: 0 0 auto;
+    flex: 0 0 28px;
     color: var(--accent);
     font-size: 8px;
     font-weight: 750;
   }
 
-  .roadmap-card {
+  .roadmap-followup {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
-    margin-top: 16px;
-    padding: 17px 19px;
+    gap: 24px;
+    margin-top: 18px;
+    padding: 18px;
     border: 1px solid var(--line);
-    border-radius: 13px;
-    background: var(--surface);
+    border-radius: 11px;
+    background: var(--surface-2);
   }
 
   .roadmap-copy {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 11px;
   }
 
+  .roadmap-copy h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
   .roadmap-copy p {
     max-width: 600px;
+    margin: 5px 0 0;
+    color: var(--ink-soft);
+    font-size: 10px;
+    line-height: 1.5;
   }
 
   .primary-button,
@@ -1507,12 +1521,24 @@
       font-size: 11px;
     }
 
+    .next-steps-card {
+      padding: 18px;
+    }
+
     .next-steps-list li {
-      font-size: 11px;
+      font-size: 13px;
     }
 
     .step-number {
-      font-size: 9px;
+      font-size: 11px;
+    }
+
+    .roadmap-copy h2 {
+      font-size: 14px;
+    }
+
+    .roadmap-copy p {
+      font-size: 12px;
     }
 
     .primary-button,
@@ -1529,10 +1555,6 @@
     .review-layout {
       grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
       gap: 13px;
-    }
-
-    .next-steps-list {
-      grid-template-columns: 1fr;
     }
   }
 
@@ -1604,12 +1626,12 @@
       margin-top: 12px;
     }
 
-    .roadmap-card {
-      align-items: stretch;
+    .roadmap-followup {
+      align-items: flex-start;
       flex-direction: column;
-      gap: 14px;
-      margin-top: 12px;
-      padding: 15px;
+      gap: 16px;
+      margin-top: 14px;
+      padding: 14px;
     }
 
     .checkout-grid {
