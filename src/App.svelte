@@ -135,6 +135,12 @@
     identifyUser(authenticatedUser)
     signInModalOpen = false
     if (preparingAnalysis) return
+    if (hasPendingResume()) {
+      clearPendingWaitlistRole()
+      waitlistRole = ''
+      view = 'results'
+      return
+    }
     if (getPendingWaitlistRole()) {
       waitlistNotice = ''
       waitlistError = ''
@@ -155,11 +161,11 @@
       const authenticatedUser = data.session?.user ?? null
       if (authenticatedUser) {
         handleAuthenticated(authenticatedUser)
-      } else if (getPendingWaitlistRole()) {
-        waitlistRole = getPendingWaitlistRole()
-        signInModalOpen = true
       } else if (hasPendingResume()) {
         view = 'authenticating'
+        signInModalOpen = true
+      } else if (getPendingWaitlistRole()) {
+        waitlistRole = getPendingWaitlistRole()
         signInModalOpen = true
       }
     })
@@ -259,9 +265,9 @@
   }
 </script>
 
-{#if view === 'results' && user}
+{#if (view === 'results' || hasPendingResume()) && user}
   <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onSignOut={signOut} onTourReady={startFirstTour} />
-{:else if view === 'authenticating'}
+{:else if view === 'authenticating' || hasPendingResume()}
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
     <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
   </main>
