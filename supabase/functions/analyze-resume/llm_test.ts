@@ -152,7 +152,7 @@ Deno.test("request shapes unchanged", async () => {
   assert(seen.body.contents[0].parts[0].inlineData.mimeType === "application/pdf", "pdf attached")
   assert(buildGeminiBody({ ...plan }).generationConfig.responseMimeType === "application/json", "json mode")
   await callClaude({ apiKey: "KEY", model: "cm", ...plan }, (async (_u: unknown, init?: RequestInit) => { seen = JSON.parse(init!.body as string); return claudeOk(GOOD) }) as typeof fetch)
-  assert(seen.model === "cm" && seen.max_tokens === 4500 && seen.messages[0].content[0].type === "document", "claude body")
+  assert(seen.model === "cm" && seen.max_tokens === 8000 && seen.messages[0].content[0].type === "document", "claude body")
 })
 
 Deno.test("parseFeedback (including the issues rules)", () => {
@@ -166,4 +166,39 @@ Deno.test("parseFeedback (including the issues rules)", () => {
   assert(parseFeedback('{"strengths":["a"],"gaps":["g"]}') === null, "gaps without issues is rejected")
   assert(parseFeedback("sorry I cannot") === null, "garbage")
   assert(parseFeedback('{"strengths":[],"gaps":[],"suggestions":[],"issues":[]}') === null, "empty")
+})
+
+Deno.test("parseFeedback: items, kinds, defaults and the vague bullet cap", () => {
+  const full = parseFeedback(JSON.stringify({
+    strengths: ["a"], gaps: ["g"],
+    items: [
+      { section: " SKILLS ", kind: "Skill", excerpt: " Splunk ", verdict: "Relevant", kbItems: [" mh1 ", 5, ""], issue: "ignored", solution: "ignored" },
+      { section: "EXPERIENCE", kind: "weird", excerpt: "VAPT intern", verdict: "weak" },
+      { section: "SKILLS", excerpt: null, verdict: "irrelevant", issue: " buzzword ", solution: " name a tool " },
+      { section: "SKILLS", excerpt: "x", verdict: "banana" },
+      { section: "", excerpt: "x", verdict: "weak" },
+      null,
+    ],
+    issues: [{ section: "S", excerpt: null, issue: "i", solution: "s", kind: "ERROR" }, { section: "S", excerpt: null, issue: "i", solution: "s", kind: "nope" }],
+    mustHaves: [{ id: "mh2", status: "missing", evidence: null, section: " PROJECTS ", solution: " do x " }],
+    vagueBullets: Array.from({ length: 8 }, (_, n) => ({ original: "o" + n, suggestion: "s" })),
+  }))!
+  assert(full.items.length === 3, "bad verdict, empty section and junk dropped")
+  const [a, b, c] = full.items
+  assert(a.section === "SKILLS" && a.kind === "skill" && a.excerpt === "Splunk" && a.verdict === "relevant" && a.kbItems.join() === "MH1", "relevant item cleaned")
+  assert(a.issue === null && a.solution === null, "relevant item carries no issue text")
+  assert(b.kind === "other" && b.verdict === "weak" && b.issue!.length > 0 && b.solution!.length > 0, "weak item without text gets a default")
+  assert(c.excerpt === null && c.issue === "buzzword" && c.solution === "name a tool", "model text kept and trimmed")
+  assert(full.issues[0].kind === "error" && full.issues[1].kind === null, "issue kind normalised")
+  assert(full.mustHaves[0].section === "PROJECTS" && full.mustHaves[0].solution === "do x", "must-have fix details kept")
+  assert(full.vagueBullets.length === 5, "vague bullets capped at 5")
+  assert(parseFeedback(GOOD)!.items.length === 0, "items default to empty")
+})
+
+Deno.test("parseFeedback: a weak item can stand in for issues, but gaps alone cannot", () => {
+  const weak = JSON.stringify({ strengths: ["a"], gaps: ["g"], items: [{ section: "S", excerpt: "x", verdict: "weak", issue: "i", solution: "s" }] })
+  assert(parseFeedback(weak) !== null, "gaps with a weak item and no issues is accepted")
+  const relevantOnly = JSON.stringify({ strengths: ["a"], gaps: ["g"], items: [{ section: "S", excerpt: "x", verdict: "relevant" }] })
+  assert(parseFeedback(relevantOnly) === null, "gaps with nothing to show for them is rejected")
+  assert(parseFeedback(JSON.stringify({ items: [{ section: "S", excerpt: "x", verdict: "relevant" }] })) !== null, "items alone are an answer")
 })

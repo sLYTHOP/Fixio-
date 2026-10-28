@@ -1,9 +1,11 @@
 // Reads the knowledge base text (items like "- [MH1] label (seen in 9 of 9 postings)") and turns
-// the model's answer into the final result: priority and source label on every issue, plus the
-// "N of M must-haves shown" summary. Counts and labels come from the knowledge base text, never
-// from the model, so the model cannot invent them.
+// the model's answer into the final result: priority, source label and color on every issue, a
+// color on every resume item, plus the "N of M must-haves shown" summary. Counts, labels and
+// colors come from the knowledge base text and from code, never from the model, so the model
+// cannot invent them. Every weak or irrelevant item and every missing must-have becomes an
+// issue here, so coverage does not depend on the model choosing to raise it.
 
-import type { Feedback } from "./llm.ts"
+import type { Feedback, Item, IssueKind } from "./llm.ts"
 
 export type Tier = "MH" | "SP" | "NH" | "PA"
 export type KbItem = { id: string; tier: Tier; label: string; basis: string }
@@ -15,9 +17,16 @@ export type MustHaveSummary = {
   partial: number // hinted at or weak
   items: { id: string; label: string; status: MustHaveStatus; evidence: string | null }[]
 }
-export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority }
-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves"> & {
+// red: fix first (a missing must-have, a date or contact error). orange: weak, fix after the red ones.
+export type IssueColor = "red" | "orange"
+export type ItemColor = IssueColor | "green"
+export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor }
+export type FinalItem = Item & { color: ItemColor }
+export type ColorCounts = { red: number; orange: number; green: number }
+export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items"> & {
   issues: FinalIssue[]
+  items: FinalItem[]
+  colorCounts: ColorCounts
   mustHaveSummary: MustHaveSummary | null
 }
 
@@ -69,26 +78,112 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
   }
 }
 
+const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
+
+// Red for errors and for a must-have that is missing. Everything else is weak: orange.
+export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
+  if (kind === "error") return "red"
+  const missing = kind === "missing" || (!kind && excerpt === null)
+  return missing && tier === "MH" ? "red" : "orange"
+}
+
 export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
   const byId = new Map(kb.map((i) => [i.id, i]))
   const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
+  const colorRank: Record<IssueColor, number> = { red: 0, orange: 1 }
+  const summary = buildMustHaveSummary(kb, parsed.mustHaves)
 
-  const issues: FinalIssue[] = parsed.issues
-    .map((it, index) => {
-      const item = it.kbItem ? byId.get(it.kbItem) : undefined
-      const final: FinalIssue = {
-        ...it,
-        kbItem: item ? item.id : null,
-        // No matching item: the issue is about wording or clarity. Without any knowledge base
-        // items at all (an older knowledge base), do not label the source.
-        basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
-        priority: item ? priorityFor(item.tier) : "medium",
+  const make = (
+    base: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null },
+    color?: IssueColor,
+  ): FinalIssue => {
+    const item = base.kbItem ? byId.get(base.kbItem) : undefined
+    return {
+      ...base,
+      kbItem: item ? item.id : null,
+      // No matching item: the issue is about wording or clarity. Without any knowledge base
+      // items at all (an older knowledge base), do not label the source.
+      basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
+      priority: item ? priorityFor(item.tier) : "medium",
+      color: color ?? issueColor(base.kind, base.excerpt, item ? item.tier : null),
+    }
+  }
+
+  // 1. Every weak or irrelevant item becomes an issue.
+  const fromItems: FinalIssue[] = parsed.items
+    .filter((it) => it.verdict !== "relevant")
+    .map((it) => make({
+      section: it.section,
+      excerpt: it.excerpt,
+      issue: it.issue ?? "",
+      solution: it.solution ?? "",
+      kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
+      kind: "weak",
+    }, "orange"))
+
+  // 2. The model's own issues cover what no single item can show: missing content, date errors,
+  // formatting. An issue about text already covered by an item is dropped as a duplicate.
+  const covered = new Set(fromItems.map((i) => norm(i.excerpt)).filter(Boolean))
+  const fromModel: FinalIssue[] = parsed.issues
+    .filter((it) => !(it.excerpt && covered.has(norm(it.excerpt))))
+    .map((it) => make(it))
+
+  const all: FinalIssue[] = [...fromItems, ...fromModel]
+
+  // 3. A must-have the model marked missing is red, and a partial one is orange, even if the
+  // model never raised an issue about it. "Unknown" (the model skipped it) raises nothing.
+  for (const m of summary?.items ?? []) {
+    if (m.status !== "missing" && m.status !== "partial") continue
+    const reported = parsed.mustHaves.find((r) => r.id.toUpperCase() === m.id)
+    const linked = all.filter((i) => i.kbItem === m.id)
+    if (m.status === "missing") {
+      // An issue the model already raised for it is made red; if there is none, add one.
+      let upgraded = false
+      for (const i of linked) if (i.excerpt === null) { i.color = "red"; upgraded = true }
+      if (!upgraded) {
+        const short = m.label.split(":")[0]
+        all.push(make({
+          section: reported?.section ?? "Overall",
+          excerpt: null,
+          issue: `Nothing in the resume shows this must-have: ${short}.`,
+          solution: reported?.solution ?? `Add a project, lab write-up or experience line that shows ${short.toLowerCase()}.`,
+          kbItem: m.id,
+          kind: "missing",
+        }, "red"))
       }
-      return { final, index }
-    })
-    .sort((a, b) => rank[a.final.priority] - rank[b.final.priority] || a.index - b.index)
+    } else if (!linked.length) {
+      const short = m.label.split(":")[0]
+      all.push(make({
+        section: reported?.section ?? "Overall",
+        excerpt: m.evidence,
+        issue: `This only hints at a must-have and does not clearly show it: ${short}.`,
+        solution: reported?.solution ?? `Add the tool, what you did and the result, so it clearly shows ${short.toLowerCase()}.`,
+        kbItem: m.id,
+        kind: "weak",
+      }, "orange"))
+    }
+  }
+
+  const issues = all
+    .map((final, index) => ({ final, index }))
+    .sort((a, b) =>
+      colorRank[a.final.color] - colorRank[b.final.color] ||
+      rank[a.final.priority] - rank[b.final.priority] ||
+      a.index - b.index)
     .map((x) => x.final)
 
-  const { mustHaves, issues: _drop, ...rest } = parsed
-  return { ...rest, issues, mustHaveSummary: buildMustHaveSummary(kb, mustHaves) }
+  const items: FinalItem[] = parsed.items.map((it) => ({
+    ...it,
+    kbItems: it.kbItems.filter((id) => byId.has(id)),
+    color: it.verdict === "relevant" ? "green" : "orange",
+  }))
+
+  const colorCounts: ColorCounts = {
+    red: issues.filter((i) => i.color === "red").length,
+    orange: issues.filter((i) => i.color === "orange").length,
+    green: items.filter((i) => i.color === "green").length,
+  }
+
+  const { mustHaves: _m, issues: _i, items: _it, ...rest } = parsed
+  return { ...rest, issues, items, colorCounts, mustHaveSummary: summary }
 }

@@ -21,7 +21,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
 // Bump when analysis prompt or output semantics change.
-const ANALYSIS_VERSION = "1"
+const ANALYSIS_VERSION = "2"
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
@@ -157,24 +157,40 @@ ${kb.content}
 
 Instructions:
 - Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
-- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears).
-- Identify genuine strengths (clearly present and relevant) as short phrases of at most 12 words, and genuine gaps. Base gaps mainly on [MH#] and [SP#] items. Raise [NH#] or [PA#] items only when the resume shows no sign of them, and at most 2 such issues in total. Never present an [NH#] or [PA#] item as a major problem.
-- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF. Set kbItem to the ID of the knowledge base item the issue comes from (for example "MH6"), or null when the issue is about wording or clarity rather than a knowledge base item.
-- Where the resume is already strong in an area, say so under strengths and do not create an issue for it. Do not invent gaps to fill the output. Fewer real issues are better than many weak ones.
+- Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
+- Split the resume into items and give EVERY item a verdict under "items". One item for each: skill listed in a skills section (quote the skill itself), experience entry (a job or internship, taken as a whole), project, certification or course, and education entry, plus one for any other section that carries content (summary, achievements). Do not leave any of them out.
+- Verdicts: "relevant" = clearly shows something this role asks for in the knowledge base. "weak" = related to the role but thin, basic or vague, or only partly showing what the role asks for (for example an internship outside SOC work, or a certification the postings do not name). "irrelevant" = shows nothing this role asks for (a buzzword with no tool or context such as "AI", a skill SOC teams do not use, an entry unrelated to security).
+- Work outside SOC (for example penetration testing or an unrelated internship) is "weak", not "irrelevant", when it still shows items the knowledge base asks for, such as vulnerability work, networking, logs or documentation. Say which items it supports in kbItems, and what the candidate should add to link it to SOC work.
+- Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak". If the knowledge base has a certification ladder, use it: in the solution for a weak certification, name the next step on the ladder. Never invent certifications the knowledge base does not mention.
+- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact, contiguous quote copied from the resume; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (a concrete, role-relevant fix, one or two sentences). For "relevant" items, issue and solution are null.
+- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence).
+- Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
+- Where the resume is already strong in an area, mark the items "relevant" and say so under strengths (short phrases of at most 12 words). Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
 - Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
-- Formatting: raise at most 1 formatting issue, and only for a real problem that would hurt shortlisting (for example unreadable sections or missing contact details).
-- Also flag up to 2 resume bullet points that read as vague or generic (lacking tools, scale or outcome). Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
+- Also flag resume bullet points that read as vague or generic (lacking tools, scale or outcome), up to 5. Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
 - Give 2-4 concrete suggestions (certs, projects, learning paths) drawn from the knowledge base to close the real gaps.
-- Respond with ONLY valid JSON, no prose before or after, in this exact shape:
+- Keep every sentence short. Respond with ONLY valid JSON, no prose before or after, in this exact shape:
 {
   "strengths": ["short phrase", "..."],
-  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null"}],
+  "items": [
+    {
+      "section": "exact resume section heading",
+      "kind": "skill | experience | project | certification | education | other",
+      "excerpt": "exact contiguous resume text",
+      "verdict": "relevant | weak | irrelevant",
+      "kbItems": ["MH1", "SP2"],
+      "issue": "what is weak and why it matters, or null when relevant",
+      "solution": "a concrete, role-relevant way to improve it, or null when relevant"
+    }
+  ],
+  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null", "section": "where the fix belongs, or null when present", "solution": "one concrete sentence, or null when present"}],
   "gaps": ["short phrase with a brief why-it-matters", "..."],
   "issues": [
     {
       "section": "exact resume section heading",
       "excerpt": "exact contiguous resume text, or null when the skill/detail is missing",
-      "issue": "what is weak or missing and why it matters",
+      "kind": "missing | error | weak",
+      "issue": "what is missing or wrong and why it matters",
       "solution": "a concrete, role-relevant way to improve it",
       "kbItem": "ID of the knowledge base item, or null"
     }
@@ -193,9 +209,13 @@ Instructions:
 
     // Retries, model fallback and timeouts happen here, silently. The user just waits a bit longer.
     const llm = await runWithFallback(attempts, { systemPrompt, userText, pdfBase64: base64 }, {
+      // The answer is longer now (it lists every resume item), so each call gets more time. The
+      // total stays under the 150 second limit on the Supabase free plan.
+      timeoutMs: 55_000,
+      softDeadlineMs: 80_000,
       validate: (text) => {
         const p = parseFeedback(text)
-        return p !== null && (!hasMustHaves || p.mustHaves.length > 0)
+        return p !== null && p.items.length > 0 && (!hasMustHaves || p.mustHaves.length > 0)
       },
     })
     if (!llm.ok) {

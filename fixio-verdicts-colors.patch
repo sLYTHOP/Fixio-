@@ -1,0 +1,546 @@
+diff --git a/supabase/functions/analyze-resume/index.ts b/supabase/functions/analyze-resume/index.ts
+index 03e3d43..7800510 100644
+--- a/supabase/functions/analyze-resume/index.ts
++++ b/supabase/functions/analyze-resume/index.ts
+@@ -21,7 +21,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
+ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+ const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+ // Bump when analysis prompt or output semantics change.
+-const ANALYSIS_VERSION = "1"
++const ANALYSIS_VERSION = "2"
+ 
+ async function sha256Hex(bytes: Uint8Array) {
+   const digest = await crypto.subtle.digest("SHA-256", bytes)
+@@ -157,24 +157,40 @@ ${kb.content}
+ 
+ Instructions:
+ - Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
+-- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears).
+-- Identify genuine strengths (clearly present and relevant) as short phrases of at most 12 words, and genuine gaps. Base gaps mainly on [MH#] and [SP#] items. Raise [NH#] or [PA#] items only when the resume shows no sign of them, and at most 2 such issues in total. Never present an [NH#] or [PA#] item as a major problem.
+-- For every genuine gap and each weak resume passage, create an issue with a concise solution. Use the exact section heading as printed in the resume. If the issue concerns missing content, set excerpt to null so the section heading can be highlighted. If the issue concerns weak content that is present, excerpt must be an exact, contiguous quote copied from the resume PDF. Set kbItem to the ID of the knowledge base item the issue comes from (for example "MH6"), or null when the issue is about wording or clarity rather than a knowledge base item.
+-- Where the resume is already strong in an area, say so under strengths and do not create an issue for it. Do not invent gaps to fill the output. Fewer real issues are better than many weak ones.
++- Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
++- Split the resume into items and give EVERY item a verdict under "items". One item for each: skill listed in a skills section (quote the skill itself), experience entry (a job or internship, taken as a whole), project, certification or course, and education entry, plus one for any other section that carries content (summary, achievements). Do not leave any of them out.
++- Verdicts: "relevant" = clearly shows something this role asks for in the knowledge base. "weak" = related to the role but thin, basic or vague, or only partly showing what the role asks for (for example an internship outside SOC work, or a certification the postings do not name). "irrelevant" = shows nothing this role asks for (a buzzword with no tool or context such as "AI", a skill SOC teams do not use, an entry unrelated to security).
++- Work outside SOC (for example penetration testing or an unrelated internship) is "weak", not "irrelevant", when it still shows items the knowledge base asks for, such as vulnerability work, networking, logs or documentation. Say which items it supports in kbItems, and what the candidate should add to link it to SOC work.
++- Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak". If the knowledge base has a certification ladder, use it: in the solution for a weak certification, name the next step on the ladder. Never invent certifications the knowledge base does not mention.
++- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact, contiguous quote copied from the resume; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (a concrete, role-relevant fix, one or two sentences). For "relevant" items, issue and solution are null.
++- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence).
++- Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
++- Where the resume is already strong in an area, mark the items "relevant" and say so under strengths (short phrases of at most 12 words). Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
+ - Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
+-- Formatting: raise at most 1 formatting issue, and only for a real problem that would hurt shortlisting (for example unreadable sections or missing contact details).
+-- Also flag up to 2 resume bullet points that read as vague or generic (lacking tools, scale or outcome). Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
++- Also flag resume bullet points that read as vague or generic (lacking tools, scale or outcome), up to 5. Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
+ - Give 2-4 concrete suggestions (certs, projects, learning paths) drawn from the knowledge base to close the real gaps.
+-- Respond with ONLY valid JSON, no prose before or after, in this exact shape:
++- Keep every sentence short. Respond with ONLY valid JSON, no prose before or after, in this exact shape:
+ {
+   "strengths": ["short phrase", "..."],
+-  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null"}],
++  "items": [
++    {
++      "section": "exact resume section heading",
++      "kind": "skill | experience | project | certification | education | other",
++      "excerpt": "exact contiguous resume text",
++      "verdict": "relevant | weak | irrelevant",
++      "kbItems": ["MH1", "SP2"],
++      "issue": "what is weak and why it matters, or null when relevant",
++      "solution": "a concrete, role-relevant way to improve it, or null when relevant"
++    }
++  ],
++  "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null", "section": "where the fix belongs, or null when present", "solution": "one concrete sentence, or null when present"}],
+   "gaps": ["short phrase with a brief why-it-matters", "..."],
+   "issues": [
+     {
+       "section": "exact resume section heading",
+       "excerpt": "exact contiguous resume text, or null when the skill/detail is missing",
+-      "issue": "what is weak or missing and why it matters",
++      "kind": "missing | error | weak",
++      "issue": "what is missing or wrong and why it matters",
+       "solution": "a concrete, role-relevant way to improve it",
+       "kbItem": "ID of the knowledge base item, or null"
+     }
+@@ -193,9 +209,13 @@ Instructions:
+ 
+     // Retries, model fallback and timeouts happen here, silently. The user just waits a bit longer.
+     const llm = await runWithFallback(attempts, { systemPrompt, userText, pdfBase64: base64 }, {
++      // The answer is longer now (it lists every resume item), so each call gets more time. The
++      // total stays under the 150 second limit on the Supabase free plan.
++      timeoutMs: 55_000,
++      softDeadlineMs: 80_000,
+       validate: (text) => {
+         const p = parseFeedback(text)
+-        return p !== null && (!hasMustHaves || p.mustHaves.length > 0)
++        return p !== null && p.items.length > 0 && (!hasMustHaves || p.mustHaves.length > 0)
+       },
+     })
+     if (!llm.ok) {
+diff --git a/supabase/functions/analyze-resume/kb.ts b/supabase/functions/analyze-resume/kb.ts
+index 40eddc8..e6d666a 100644
+--- a/supabase/functions/analyze-resume/kb.ts
++++ b/supabase/functions/analyze-resume/kb.ts
+@@ -1,9 +1,11 @@
+ // Reads the knowledge base text (items like "- [MH1] label (seen in 9 of 9 postings)") and turns
+-// the model's answer into the final result: priority and source label on every issue, plus the
+-// "N of M must-haves shown" summary. Counts and labels come from the knowledge base text, never
+-// from the model, so the model cannot invent them.
++// the model's answer into the final result: priority, source label and color on every issue, a
++// color on every resume item, plus the "N of M must-haves shown" summary. Counts, labels and
++// colors come from the knowledge base text and from code, never from the model, so the model
++// cannot invent them. Every weak or irrelevant item and every missing must-have becomes an
++// issue here, so coverage does not depend on the model choosing to raise it.
+ 
+-import type { Feedback } from "./llm.ts"
++import type { Feedback, Item, IssueKind } from "./llm.ts"
+ 
+ export type Tier = "MH" | "SP" | "NH" | "PA"
+ export type KbItem = { id: string; tier: Tier; label: string; basis: string }
+@@ -15,9 +17,16 @@ export type MustHaveSummary = {
+   partial: number // hinted at or weak
+   items: { id: string; label: string; status: MustHaveStatus; evidence: string | null }[]
+ }
+-export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority }
+-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves"> & {
++// red: fix first (a missing must-have, a date or contact error). orange: weak, fix after the red ones.
++export type IssueColor = "red" | "orange"
++export type ItemColor = IssueColor | "green"
++export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor }
++export type FinalItem = Item & { color: ItemColor }
++export type ColorCounts = { red: number; orange: number; green: number }
++export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items"> & {
+   issues: FinalIssue[]
++  items: FinalItem[]
++  colorCounts: ColorCounts
+   mustHaveSummary: MustHaveSummary | null
+ }
+ 
+@@ -69,26 +78,112 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
+   }
+ }
+ 
++const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
++
++// Red for errors and for a must-have that is missing. Everything else is weak: orange.
++export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
++  if (kind === "error") return "red"
++  const missing = kind === "missing" || (!kind && excerpt === null)
++  return missing && tier === "MH" ? "red" : "orange"
++}
++
+ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
+   const byId = new Map(kb.map((i) => [i.id, i]))
+   const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
++  const colorRank: Record<IssueColor, number> = { red: 0, orange: 1 }
++  const summary = buildMustHaveSummary(kb, parsed.mustHaves)
++
++  const make = (
++    base: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null },
++    color?: IssueColor,
++  ): FinalIssue => {
++    const item = base.kbItem ? byId.get(base.kbItem) : undefined
++    return {
++      ...base,
++      kbItem: item ? item.id : null,
++      // No matching item: the issue is about wording or clarity. Without any knowledge base
++      // items at all (an older knowledge base), do not label the source.
++      basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
++      priority: item ? priorityFor(item.tier) : "medium",
++      color: color ?? issueColor(base.kind, base.excerpt, item ? item.tier : null),
++    }
++  }
++
++  // 1. Every weak or irrelevant item becomes an issue.
++  const fromItems: FinalIssue[] = parsed.items
++    .filter((it) => it.verdict !== "relevant")
++    .map((it) => make({
++      section: it.section,
++      excerpt: it.excerpt,
++      issue: it.issue ?? "",
++      solution: it.solution ?? "",
++      kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
++      kind: "weak",
++    }, "orange"))
++
++  // 2. The model's own issues cover what no single item can show: missing content, date errors,
++  // formatting. An issue about text already covered by an item is dropped as a duplicate.
++  const covered = new Set(fromItems.map((i) => norm(i.excerpt)).filter(Boolean))
++  const fromModel: FinalIssue[] = parsed.issues
++    .filter((it) => !(it.excerpt && covered.has(norm(it.excerpt))))
++    .map((it) => make(it))
+ 
+-  const issues: FinalIssue[] = parsed.issues
+-    .map((it, index) => {
+-      const item = it.kbItem ? byId.get(it.kbItem) : undefined
+-      const final: FinalIssue = {
+-        ...it,
+-        kbItem: item ? item.id : null,
+-        // No matching item: the issue is about wording or clarity. Without any knowledge base
+-        // items at all (an older knowledge base), do not label the source.
+-        basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
+-        priority: item ? priorityFor(item.tier) : "medium",
++  const all: FinalIssue[] = [...fromItems, ...fromModel]
++
++  // 3. A must-have the model marked missing is red, and a partial one is orange, even if the
++  // model never raised an issue about it. "Unknown" (the model skipped it) raises nothing.
++  for (const m of summary?.items ?? []) {
++    if (m.status !== "missing" && m.status !== "partial") continue
++    const reported = parsed.mustHaves.find((r) => r.id.toUpperCase() === m.id)
++    const linked = all.filter((i) => i.kbItem === m.id)
++    if (m.status === "missing") {
++      // An issue the model already raised for it is made red; if there is none, add one.
++      let upgraded = false
++      for (const i of linked) if (i.excerpt === null) { i.color = "red"; upgraded = true }
++      if (!upgraded) {
++        const short = m.label.split(":")[0]
++        all.push(make({
++          section: reported?.section ?? "Overall",
++          excerpt: null,
++          issue: `Nothing in the resume shows this must-have: ${short}.`,
++          solution: reported?.solution ?? `Add a project, lab write-up or experience line that shows ${short.toLowerCase()}.`,
++          kbItem: m.id,
++          kind: "missing",
++        }, "red"))
+       }
+-      return { final, index }
+-    })
+-    .sort((a, b) => rank[a.final.priority] - rank[b.final.priority] || a.index - b.index)
++    } else if (!linked.length) {
++      const short = m.label.split(":")[0]
++      all.push(make({
++        section: reported?.section ?? "Overall",
++        excerpt: m.evidence,
++        issue: `This only hints at a must-have and does not clearly show it: ${short}.`,
++        solution: reported?.solution ?? `Add the tool, what you did and the result, so it clearly shows ${short.toLowerCase()}.`,
++        kbItem: m.id,
++        kind: "weak",
++      }, "orange"))
++    }
++  }
++
++  const issues = all
++    .map((final, index) => ({ final, index }))
++    .sort((a, b) =>
++      colorRank[a.final.color] - colorRank[b.final.color] ||
++      rank[a.final.priority] - rank[b.final.priority] ||
++      a.index - b.index)
+     .map((x) => x.final)
+ 
+-  const { mustHaves, issues: _drop, ...rest } = parsed
+-  return { ...rest, issues, mustHaveSummary: buildMustHaveSummary(kb, mustHaves) }
++  const items: FinalItem[] = parsed.items.map((it) => ({
++    ...it,
++    kbItems: it.kbItems.filter((id) => byId.has(id)),
++    color: it.verdict === "relevant" ? "green" : "orange",
++  }))
++
++  const colorCounts: ColorCounts = {
++    red: issues.filter((i) => i.color === "red").length,
++    orange: issues.filter((i) => i.color === "orange").length,
++    green: items.filter((i) => i.color === "green").length,
++  }
++
++  const { mustHaves: _m, issues: _i, items: _it, ...rest } = parsed
++  return { ...rest, issues, items, colorCounts, mustHaveSummary: summary }
+ }
+diff --git a/supabase/functions/analyze-resume/kb_test.ts b/supabase/functions/analyze-resume/kb_test.ts
+index 9f27cd7..0b9d383 100644
+--- a/supabase/functions/analyze-resume/kb_test.ts
++++ b/supabase/functions/analyze-resume/kb_test.ts
+@@ -1,6 +1,6 @@
+ // Run: deno test kb_test.ts
+-import { buildMustHaveSummary, finalizeFeedback, parseKnowledgeBase, priorityFor } from "./kb.ts"
+-import type { Feedback } from "./llm.ts"
++import { buildMustHaveSummary, finalizeFeedback, issueColor, parseKnowledgeBase, priorityFor } from "./kb.ts"
++import type { Feedback, Item } from "./llm.ts"
+ 
+ const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
+ 
+@@ -47,7 +47,7 @@ Deno.test("no must-haves in the knowledge base -> no summary", () => {
+ })
+ 
+ const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
+-  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves })
++  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [] })
+ const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
+ 
+ Deno.test("issues get source label and priority, sorted high to low", () => {
+@@ -67,3 +67,85 @@ Deno.test("older knowledge base without ids: no false source label", () => {
+   const out = finalizeFeedback(base([issue(null)]), parseKnowledgeBase("plain text knowledge base"))
+   assert(out.issues[0].basis === null && out.issues[0].priority === "medium" && out.mustHaveSummary === null, "unlabelled")
+ })
++
++// ---------- verdicts, colors and issues built in code ----------
++
++const item = (over: Partial<Item>): Item =>
++  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], issue: null, solution: null, ...over })
++const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
++  ({ ...base(issues, mustHaves), items })
++
++Deno.test("issueColor: error and missing must-have are red, the rest orange", () => {
++  assert(issueColor("error", "x", null) === "red", "error is red")
++  assert(issueColor("missing", null, "MH") === "red", "missing must-have is red")
++  assert(issueColor(null, null, "MH") === "red", "no kind and no excerpt counts as missing")
++  assert(issueColor("missing", null, "SP") === "orange" && issueColor("missing", null, "NH") === "orange", "missing lower tier is orange")
++  assert(issueColor("missing", null, null) === "orange", "missing with no knowledge base item is orange")
++  assert(issueColor("weak", "quote", "MH") === "orange" && issueColor(null, "quote", "MH") === "orange", "weak content is orange")
++})
++
++Deno.test("every weak or irrelevant item becomes an orange issue, relevant items turn green", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([
++    item({ excerpt: "Splunk alerts", verdict: "relevant", kbItems: ["MH1", "ZZ9"] }),
++    item({ excerpt: "AI", verdict: "irrelevant", issue: "buzzword", solution: "name a tool" }),
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "VAPT intern", verdict: "weak", kbItems: ["ZZ9", "SP1"], issue: "not SOC", solution: "add log work" }),
++  ]), kb)
++  assert(out.issues.length === 2 && out.issues.every((i) => i.color === "orange"), "two orange issues")
++  const vapt = out.issues.find((i) => i.excerpt === "VAPT intern")!
++  assert(vapt.kbItem === "SP1" && vapt.priority === "medium" && vapt.basis === "required in 4 of 9 postings, an advantage in 2 more", "first known knowledge base item is used")
++  assert(out.issues.find((i) => i.excerpt === "AI")!.basis === "general practice, not from the job postings", "no item: general practice")
++  assert(out.items.map((i) => i.color).join() === "green,orange,orange", "item colors")
++  assert(out.items[0].kbItems.join() === "MH1", "unknown ids dropped from items")
++  assert(out.colorCounts.red === 0 && out.colorCounts.orange === 2 && out.colorCounts.green === 1, "counts")
++})
++
++Deno.test("a missing must-have gets a red issue even if the model raised none", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([], [
++    { id: "MH1", status: "present", evidence: "Splunk" },
++    { id: "MH2", status: "missing", evidence: null, section: "PROJECTS", solution: "Write up a triage case." },
++    { id: "MH3", status: "missing", evidence: null },
++  ]), kb)
++  const mh2 = out.issues.find((i) => i.kbItem === "MH2")!
++  assert(mh2.color === "red" && mh2.section === "PROJECTS" && mh2.solution === "Write up a triage case." && mh2.excerpt === null, "model's section and fix used")
++  const mh3 = out.issues.find((i) => i.kbItem === "MH3")!
++  assert(mh3.color === "red" && mh3.section === "Overall" && mh3.solution.length > 0, "fallback section and fix")
++  assert(!out.issues.some((i) => i.kbItem === "MH1"), "present must-have raises nothing")
++})
++
++Deno.test("partial must-have is orange, an unknown one raises nothing", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([], [{ id: "MH1", status: "partial", evidence: "alerts" }]), kb)
++  assert(out.issues.length === 1, "only MH1 partial raises an issue")
++  const mh1 = out.issues.find((i) => i.kbItem === "MH1")!
++  assert(mh1.color === "orange" && mh1.excerpt === "alerts", "partial is orange and quotes the evidence")
++  assert(!out.issues.some((i) => i.kbItem === "MH2" || i.kbItem === "MH3"), "skipped must-haves are not guessed")
++})
++
++Deno.test("an issue the model raised for a missing must-have is made red, not duplicated", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([], [{ id: "MH2", status: "missing", evidence: null }],
++    [{ section: "SKILLS", excerpt: null, issue: "no triage", solution: "add it", kbItem: "MH2", kind: "weak" }]), kb)
++  const forMh2 = out.issues.filter((i) => i.kbItem === "MH2")
++  assert(forMh2.length === 1 && forMh2[0].color === "red" && forMh2[0].solution === "add it", "one red issue, model's text kept")
++})
++
++Deno.test("model issues: error is red, same excerpt as an item is not repeated, red sorts first", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems(
++    [item({ excerpt: "  Built   a lab ", verdict: "weak", issue: "thin", solution: "add detail" })],
++    [],
++    [
++      { section: "EXPERIENCE", excerpt: "built a lab", issue: "same thing", solution: "dup", kbItem: null, kind: "weak" },
++      { section: "EXPERIENCE", excerpt: "Jan 2031 - Feb 2030", issue: "bad date", solution: "fix it", kbItem: null, kind: "error" },
++    ]), kb)
++  assert(out.issues.length === 2, "duplicate dropped: " + out.issues.map((i) => i.issue).join("|"))
++  assert(out.issues[0].issue === "bad date" && out.issues[0].color === "red" && out.issues[1].color === "orange", "red first")
++  assert(out.colorCounts.red === 1 && out.colorCounts.orange === 1, "counts")
++})
++
++Deno.test("no knowledge base ids at all: items still become issues without a source label", () => {
++  const out = finalizeFeedback(withItems([item({ verdict: "weak", issue: "i", solution: "s" })]), parseKnowledgeBase("plain text"))
++  assert(out.issues[0].basis === null && out.issues[0].color === "orange" && out.mustHaveSummary === null, "unlabelled")
++})
+diff --git a/supabase/functions/analyze-resume/llm.ts b/supabase/functions/analyze-resume/llm.ts
+index fbfc2ce..49fc0a4 100644
+--- a/supabase/functions/analyze-resume/llm.ts
++++ b/supabase/functions/analyze-resume/llm.ts
+@@ -12,12 +12,26 @@ export type LlmFail = { ok: false; reason: string; status?: number; transient: b
+ export type LlmResult = { ok: true; text: string } | LlmFail
+ type FetchFn = typeof fetch
+ 
++export type ItemVerdict = "relevant" | "weak" | "irrelevant"
++export type IssueKind = "missing" | "weak" | "error"
++// One thing on the resume (a skill, a job, a project, a certification...) with a verdict on it.
++export type Item = {
++  section: string
++  kind: string // skill | experience | project | certification | education | other
++  excerpt: string | null
++  verdict: ItemVerdict
++  kbItems: string[]
++  issue: string | null
++  solution: string | null
++}
++
+ export type Feedback = {
+   strengths: string[]
+   gaps: string[]
+   suggestions: string[]
+-  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null }[]
+-  mustHaves: { id: string; status: string; evidence: string | null }[]
++  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null }[]
++  items: Item[]
++  mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
+   vagueBullets: { original: string; suggestion: string }[]
+ }
+ 
+@@ -69,7 +83,8 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
+     { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+     {
+       model: o.model,
+-      max_tokens: 4500,
++      max_tokens: 8000, // the answer lists every resume item, so it is longer than before
++      temperature: 0.2,
+       system: o.systemPrompt,
+       messages: [{
+         role: "user",
+@@ -114,8 +129,8 @@ export function buildGeminiBody(o: Pick<CallOpts, "systemPrompt" | "userText" |
+     }],
+     generationConfig: {
+       responseMimeType: "application/json", // asks Gemini for raw JSON, fewer parse errors
+-      maxOutputTokens: 6000,                // headroom in case the model spends tokens thinking
+-      temperature: 0.3,
++      maxOutputTokens: 12000,               // headroom in case the model spends tokens thinking
++      temperature: 0.1,                    // low, so the same resume gets more consistent answers
+     },
+   }
+ }
+@@ -222,6 +237,16 @@ export async function runWithFallback(attempts: Attempt[], plan: Plan, deps: Dep
+ const strList = (v: unknown): string[] =>
+   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim()) : []
+ 
++const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
++const ISSUE_KINDS = new Set(["missing", "weak", "error"])
++const ITEM_KINDS = new Set(["skill", "experience", "project", "certification", "education", "other"])
++const cleanStr = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
++
++// Used when the model marks an item weak or irrelevant but forgets to say why. The item still
++// becomes an issue, so coverage never depends on the model writing the explanation.
++const DEFAULT_ITEM_ISSUE = "This part of the resume does not clearly show what the role asks for."
++const DEFAULT_ITEM_SOLUTION = "Reword it or replace it with a concrete, role-relevant detail: the tool used, what you did and what came out of it."
++
+ // Parses model text into the exact shape the frontend expects. A model that
+ // leaves out a field must never crash the results page.
+ export function parseFeedback(text: string): Feedback | null {
+@@ -235,6 +260,7 @@ export function parseFeedback(text: string): Feedback | null {
+ 
+   const vague = Array.isArray(raw.vagueBullets) ? raw.vagueBullets : []
+   const issues = Array.isArray(raw.issues) ? raw.issues : []
++  const items = Array.isArray(raw.items) ? raw.items : []
+   const out: Feedback = {
+     strengths: strList(raw.strengths),
+     gaps: strList(raw.gaps),
+@@ -247,28 +273,51 @@ export function parseFeedback(text: string): Feedback | null {
+         typeof item.solution === "string" &&
+         (item.excerpt === null || typeof item.excerpt === "string")
+       )
+-      .map((item: any) => ({
+-        section: item.section.trim(),
+-        excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
+-        issue: item.issue.trim(),
+-        solution: item.solution.trim(),
+-        kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
+-      }))
++      .map((item: any) => {
++        const kind = typeof item.kind === "string" ? item.kind.trim().toLowerCase() : ""
++        return {
++          section: item.section.trim(),
++          excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
++          issue: item.issue.trim(),
++          solution: item.solution.trim(),
++          kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
++          kind: ISSUE_KINDS.has(kind) ? (kind as IssueKind) : null,
++        }
++      })
+       .filter((item: { section: string; issue: string; solution: string }) => item.section && item.issue && item.solution),
++    items: items
++      .filter((it: any) => it && typeof it.section === "string" && it.section.trim() && typeof it.verdict === "string" && VERDICTS.has(it.verdict.trim().toLowerCase()))
++      .map((it: any): Item => {
++        const verdict = it.verdict.trim().toLowerCase() as ItemVerdict
++        const kind = typeof it.kind === "string" ? it.kind.trim().toLowerCase() : ""
++        const ok = verdict !== "relevant"
++        return {
++          section: it.section.trim(),
++          kind: ITEM_KINDS.has(kind) ? kind : "other",
++          excerpt: cleanStr(it.excerpt),
++          verdict,
++          kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
++          issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
++          solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
++        }
++      }),
+     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
+       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
+       .map((m: any) => ({
+         id: m.id.trim().toUpperCase(),
+         status: m.status.trim().toLowerCase(),
+         evidence: typeof m.evidence === "string" && m.evidence.trim() ? m.evidence.trim() : null,
++        section: cleanStr(m.section),
++        solution: cleanStr(m.solution),
+       })),
+     vagueBullets: vague
+       .filter((b: any) => b && typeof b.original === "string" && typeof b.suggestion === "string")
+-      .slice(0, 2)
++      .slice(0, 5)
+       .map((b: any) => ({ original: b.original, suggestion: b.suggestion })),
+   }
+-  if ((out.gaps.length || out.vagueBullets.length) && !out.issues.length) return null
++  const hasWeakItem = out.items.some((it) => it.verdict !== "relevant")
++  if ((out.gaps.length || out.vagueBullets.length) && !out.issues.length && !hasWeakItem) return null
+   // An answer with nothing in any list is a failed answer, not feedback.
+-  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length && !out.issues.length) return null
++  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length && !out.issues.length && !out.items.length) return null
+   return out
+ }
+diff --git a/supabase/functions/analyze-resume/llm_test.ts b/supabase/functions/analyze-resume/llm_test.ts
+index c7a01c4..4bd5c79 100644
+--- a/supabase/functions/analyze-resume/llm_test.ts
++++ b/supabase/functions/analyze-resume/llm_test.ts
+@@ -152,7 +152,7 @@ Deno.test("request shapes unchanged", async () => {
+   assert(seen.body.contents[0].parts[0].inlineData.mimeType === "application/pdf", "pdf attached")
+   assert(buildGeminiBody({ ...plan }).generationConfig.responseMimeType === "application/json", "json mode")
+   await callClaude({ apiKey: "KEY", model: "cm", ...plan }, (async (_u: unknown, init?: RequestInit) => { seen = JSON.parse(init!.body as string); return claudeOk(GOOD) }) as typeof fetch)
+-  assert(seen.model === "cm" && seen.max_tokens === 4500 && seen.messages[0].content[0].type === "document", "claude body")
++  assert(seen.model === "cm" && seen.max_tokens === 8000 && seen.messages[0].content[0].type === "document", "claude body")
+ })
+ 
+ Deno.test("parseFeedback (including the issues rules)", () => {
+@@ -167,3 +167,38 @@ Deno.test("parseFeedback (including the issues rules)", () => {
+   assert(parseFeedback("sorry I cannot") === null, "garbage")
+   assert(parseFeedback('{"strengths":[],"gaps":[],"suggestions":[],"issues":[]}') === null, "empty")
+ })
++
++Deno.test("parseFeedback: items, kinds, defaults and the vague bullet cap", () => {
++  const full = parseFeedback(JSON.stringify({
++    strengths: ["a"], gaps: ["g"],
++    items: [
++      { section: " SKILLS ", kind: "Skill", excerpt: " Splunk ", verdict: "Relevant", kbItems: [" mh1 ", 5, ""], issue: "ignored", solution: "ignored" },
++      { section: "EXPERIENCE", kind: "weird", excerpt: "VAPT intern", verdict: "weak" },
++      { section: "SKILLS", excerpt: null, verdict: "irrelevant", issue: " buzzword ", solution: " name a tool " },
++      { section: "SKILLS", excerpt: "x", verdict: "banana" },
++      { section: "", excerpt: "x", verdict: "weak" },
++      null,
++    ],
++    issues: [{ section: "S", excerpt: null, issue: "i", solution: "s", kind: "ERROR" }, { section: "S", excerpt: null, issue: "i", solution: "s", kind: "nope" }],
++    mustHaves: [{ id: "mh2", status: "missing", evidence: null, section: " PROJECTS ", solution: " do x " }],
++    vagueBullets: Array.from({ length: 8 }, (_, n) => ({ original: "o" + n, suggestion: "s" })),
++  }))!
++  assert(full.items.length === 3, "bad verdict, empty section and junk dropped")
++  const [a, b, c] = full.items
++  assert(a.section === "SKILLS" && a.kind === "skill" && a.excerpt === "Splunk" && a.verdict === "relevant" && a.kbItems.join() === "MH1", "relevant item cleaned")
++  assert(a.issue === null && a.solution === null, "relevant item carries no issue text")
++  assert(b.kind === "other" && b.verdict === "weak" && b.issue!.length > 0 && b.solution!.length > 0, "weak item without text gets a default")
++  assert(c.excerpt === null && c.issue === "buzzword" && c.solution === "name a tool", "model text kept and trimmed")
++  assert(full.issues[0].kind === "error" && full.issues[1].kind === null, "issue kind normalised")
++  assert(full.mustHaves[0].section === "PROJECTS" && full.mustHaves[0].solution === "do x", "must-have fix details kept")
++  assert(full.vagueBullets.length === 5, "vague bullets capped at 5")
++  assert(parseFeedback(GOOD)!.items.length === 0, "items default to empty")
++})
++
++Deno.test("parseFeedback: a weak item can stand in for issues, but gaps alone cannot", () => {
++  const weak = JSON.stringify({ strengths: ["a"], gaps: ["g"], items: [{ section: "S", excerpt: "x", verdict: "weak", issue: "i", solution: "s" }] })
++  assert(parseFeedback(weak) !== null, "gaps with a weak item and no issues is accepted")
++  const relevantOnly = JSON.stringify({ strengths: ["a"], gaps: ["g"], items: [{ section: "S", excerpt: "x", verdict: "relevant" }] })
++  assert(parseFeedback(relevantOnly) === null, "gaps with nothing to show for them is rejected")
++  assert(parseFeedback(JSON.stringify({ items: [{ section: "S", excerpt: "x", verdict: "relevant" }] })) !== null, "items alone are an answer")
++})

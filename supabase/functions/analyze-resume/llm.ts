@@ -12,12 +12,26 @@ export type LlmFail = { ok: false; reason: string; status?: number; transient: b
 export type LlmResult = { ok: true; text: string } | LlmFail
 type FetchFn = typeof fetch
 
+export type ItemVerdict = "relevant" | "weak" | "irrelevant"
+export type IssueKind = "missing" | "weak" | "error"
+// One thing on the resume (a skill, a job, a project, a certification...) with a verdict on it.
+export type Item = {
+  section: string
+  kind: string // skill | experience | project | certification | education | other
+  excerpt: string | null
+  verdict: ItemVerdict
+  kbItems: string[]
+  issue: string | null
+  solution: string | null
+}
+
 export type Feedback = {
   strengths: string[]
   gaps: string[]
   suggestions: string[]
-  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null }[]
-  mustHaves: { id: string; status: string; evidence: string | null }[]
+  issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null }[]
+  items: Item[]
+  mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
 
@@ -69,7 +83,8 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
     { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     {
       model: o.model,
-      max_tokens: 4500,
+      max_tokens: 8000, // the answer lists every resume item, so it is longer than before
+      temperature: 0.2,
       system: o.systemPrompt,
       messages: [{
         role: "user",
@@ -114,8 +129,8 @@ export function buildGeminiBody(o: Pick<CallOpts, "systemPrompt" | "userText" | 
     }],
     generationConfig: {
       responseMimeType: "application/json", // asks Gemini for raw JSON, fewer parse errors
-      maxOutputTokens: 6000,                // headroom in case the model spends tokens thinking
-      temperature: 0.3,
+      maxOutputTokens: 12000,               // headroom in case the model spends tokens thinking
+      temperature: 0.1,                    // low, so the same resume gets more consistent answers
     },
   }
 }
@@ -222,6 +237,16 @@ export async function runWithFallback(attempts: Attempt[], plan: Plan, deps: Dep
 const strList = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim()) : []
 
+const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
+const ISSUE_KINDS = new Set(["missing", "weak", "error"])
+const ITEM_KINDS = new Set(["skill", "experience", "project", "certification", "education", "other"])
+const cleanStr = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
+
+// Used when the model marks an item weak or irrelevant but forgets to say why. The item still
+// becomes an issue, so coverage never depends on the model writing the explanation.
+const DEFAULT_ITEM_ISSUE = "This part of the resume does not clearly show what the role asks for."
+const DEFAULT_ITEM_SOLUTION = "Reword it or replace it with a concrete, role-relevant detail: the tool used, what you did and what came out of it."
+
 // Parses model text into the exact shape the frontend expects. A model that
 // leaves out a field must never crash the results page.
 export function parseFeedback(text: string): Feedback | null {
@@ -235,6 +260,7 @@ export function parseFeedback(text: string): Feedback | null {
 
   const vague = Array.isArray(raw.vagueBullets) ? raw.vagueBullets : []
   const issues = Array.isArray(raw.issues) ? raw.issues : []
+  const items = Array.isArray(raw.items) ? raw.items : []
   const out: Feedback = {
     strengths: strList(raw.strengths),
     gaps: strList(raw.gaps),
@@ -247,28 +273,51 @@ export function parseFeedback(text: string): Feedback | null {
         typeof item.solution === "string" &&
         (item.excerpt === null || typeof item.excerpt === "string")
       )
-      .map((item: any) => ({
-        section: item.section.trim(),
-        excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
-        issue: item.issue.trim(),
-        solution: item.solution.trim(),
-        kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
-      }))
+      .map((item: any) => {
+        const kind = typeof item.kind === "string" ? item.kind.trim().toLowerCase() : ""
+        return {
+          section: item.section.trim(),
+          excerpt: typeof item.excerpt === "string" ? item.excerpt.trim() : null,
+          issue: item.issue.trim(),
+          solution: item.solution.trim(),
+          kbItem: typeof item.kbItem === "string" && item.kbItem.trim() ? item.kbItem.trim().toUpperCase() : null,
+          kind: ISSUE_KINDS.has(kind) ? (kind as IssueKind) : null,
+        }
+      })
       .filter((item: { section: string; issue: string; solution: string }) => item.section && item.issue && item.solution),
+    items: items
+      .filter((it: any) => it && typeof it.section === "string" && it.section.trim() && typeof it.verdict === "string" && VERDICTS.has(it.verdict.trim().toLowerCase()))
+      .map((it: any): Item => {
+        const verdict = it.verdict.trim().toLowerCase() as ItemVerdict
+        const kind = typeof it.kind === "string" ? it.kind.trim().toLowerCase() : ""
+        const ok = verdict !== "relevant"
+        return {
+          section: it.section.trim(),
+          kind: ITEM_KINDS.has(kind) ? kind : "other",
+          excerpt: cleanStr(it.excerpt),
+          verdict,
+          kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
+          issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
+          solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
+        }
+      }),
     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
       .map((m: any) => ({
         id: m.id.trim().toUpperCase(),
         status: m.status.trim().toLowerCase(),
         evidence: typeof m.evidence === "string" && m.evidence.trim() ? m.evidence.trim() : null,
+        section: cleanStr(m.section),
+        solution: cleanStr(m.solution),
       })),
     vagueBullets: vague
       .filter((b: any) => b && typeof b.original === "string" && typeof b.suggestion === "string")
-      .slice(0, 2)
+      .slice(0, 5)
       .map((b: any) => ({ original: b.original, suggestion: b.suggestion })),
   }
-  if ((out.gaps.length || out.vagueBullets.length) && !out.issues.length) return null
+  const hasWeakItem = out.items.some((it) => it.verdict !== "relevant")
+  if ((out.gaps.length || out.vagueBullets.length) && !out.issues.length && !hasWeakItem) return null
   // An answer with nothing in any list is a failed answer, not feedback.
-  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length && !out.issues.length) return null
+  if (!out.strengths.length && !out.gaps.length && !out.suggestions.length && !out.issues.length && !out.items.length) return null
   return out
 }
