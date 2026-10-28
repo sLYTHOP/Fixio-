@@ -482,7 +482,7 @@
 
       <section class="review-layout" aria-label="Resume and review notes">
         <div class="resume-column">
-          <ResumePreview file={resumeFile} issues={feedback.issues} bind:activeIssue />
+          <ResumePreview file={resumeFile} issues={feedback.issues} items={feedback.items ?? []} bind:activeIssue />
         </div>
 
         <div class="review-sidebar">

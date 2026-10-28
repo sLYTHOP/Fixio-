@@ -3,7 +3,18 @@
 
   export let file
   export let issues = []
+  export let items = []
   export let activeIssue = null
+
+  const markColors = {
+    red: 'rgb(255 35 35 / 55%)',
+    orange: 'rgb(255 157 35 / 58%)',
+    green: 'rgb(40 180 85 / 48%)',
+  }
+
+  function getMarkColor(color) {
+    return markColors[color] ?? markColors.orange
+  }
 
   let containerEl
   let pages = []
@@ -67,7 +78,11 @@
     for (const mark of marks) {
       const markCenter = mark.top + mark.height / 2
       const adjacentMark = mergedMarks.find((candidate) => {
-        if (candidate.issueIndex !== mark.issueIndex || candidate.pageNumber !== mark.pageNumber) return false
+        if (
+          candidate.issueIndex !== mark.issueIndex ||
+          candidate.itemIndex !== mark.itemIndex ||
+          candidate.pageNumber !== mark.pageNumber
+        ) return false
         const candidateCenter = candidate.top + candidate.height / 2
         const sameLine = Math.abs(candidateCenter - markCenter) <= Math.min(candidate.height, mark.height) * 0.5
         const touchesHorizontally = mark.left <= candidate.left + candidate.width + 3
@@ -152,6 +167,25 @@
       await textLayer.render()
 
       const pageRect = wrapper.getBoundingClientRect()
+      items.forEach((item, itemIndex) => {
+        if (!item.excerpt) return
+        findItemIndexes(textLayer.textContentItemsStr, item.excerpt).forEach((itemTextIndex) => {
+          const textDiv = textLayer.textDivs[itemTextIndex]
+          if (!textDiv) return
+          const rect = textDiv.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+          nextMarks.push({
+            itemIndex,
+            issueIndex: null,
+            color: item.color ?? (item.verdict === 'relevant' ? 'green' : 'orange'),
+            pageNumber: page.number,
+            left: rect.left - pageRect.left,
+            top: rect.top - pageRect.top + rect.height * 0.1,
+            width: rect.width,
+            height: rect.height * 0.8,
+          })
+        })
+      })
       issues.forEach((issue, issueIndex) => {
         const excerptMatches = issue.excerpt
           ? findItemIndexes(textLayer.textContentItemsStr, issue.excerpt)
@@ -166,6 +200,8 @@
           if (!rect.width || !rect.height) return
           nextMarks.push({
             issueIndex,
+            itemIndex: null,
+            color: issue.color ?? (issue.kind === 'error' ? 'red' : 'orange'),
             pageNumber: page.number,
             left: rect.left - pageRect.left,
             top: rect.top - pageRect.top + rect.height * 0.1,
@@ -178,7 +214,7 @@
 
     if (generation === renderGeneration) {
       marks = mergeAdjacentMarks(nextMarks)
-      const matchedIssues = new Set(nextMarks.map((mark) => mark.issueIndex))
+      const matchedIssues = new Set(nextMarks.filter((mark) => mark.issueIndex !== null).map((mark) => mark.issueIndex))
       if (issues.some((_, index) => !matchedIssues.has(index))) {
         highlightWarning = 'Some sections could not be matched to selectable text in this PDF. Every finding and solution is still listed alongside the preview.'
       } else {
@@ -252,6 +288,11 @@
   <div class="resume-preview-header flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3" style="border-color: var(--line);">
     <div>
       <p class="resume-preview-title font-display font-semibold">Your resume</p>
+      <div class="resume-mark-legend" aria-label="Resume review colors">
+        <span><i class="legend-dot red"></i>Priority issue</span>
+        <span><i class="legend-dot orange"></i>Needs strengthening</span>
+        <span><i class="legend-dot green"></i>Role-relevant</span>
+      </div>
     </div>
     <a
       href={fileUrl}
@@ -288,19 +329,27 @@
           <div class="resume-text-layer"></div>
 
           {#each marks.filter((mark) => mark.pageNumber === page.number) as mark}
-            <button
-              type="button"
-              class:active={visibleIssue === mark.issueIndex}
-              class="resume-mark"
-              style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px;"
-              aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}. Suggested fix: {issues[mark.issueIndex].solution}"
-              aria-pressed={activeIssue === mark.issueIndex}
-              on:mouseenter={() => (hoveredIssue = mark.issueIndex)}
-              on:mouseleave={() => (hoveredIssue = null)}
-              on:focus={() => (hoveredIssue = mark.issueIndex)}
-              on:blur={() => (hoveredIssue = null)}
-              on:click={() => (activeIssue = activeIssue === mark.issueIndex ? null : mark.issueIndex)}
-            ></button>
+            {#if mark.issueIndex !== null}
+              <button
+                type="button"
+                class:active={visibleIssue === mark.issueIndex}
+                class="resume-mark"
+                style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px; background: {getMarkColor(mark.color)};"
+                aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}. Suggested fix: {issues[mark.issueIndex].solution}"
+                aria-pressed={activeIssue === mark.issueIndex}
+                on:mouseenter={() => (hoveredIssue = mark.issueIndex)}
+                on:mouseleave={() => (hoveredIssue = null)}
+                on:focus={() => (hoveredIssue = mark.issueIndex)}
+                on:blur={() => (hoveredIssue = null)}
+                on:click={() => (activeIssue = activeIssue === mark.issueIndex ? null : mark.issueIndex)}
+              ></button>
+            {:else}
+              <span
+                class="resume-item-mark"
+                style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px; background: {getMarkColor(mark.color)};"
+                aria-hidden="true"
+              ></span>
+            {/if}
           {/each}
 
           {#if activeMark?.pageNumber === page.number}
@@ -352,18 +401,49 @@
     transform-origin: 0 0;
   }
 
+  .resume-mark-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 6px;
+    color: var(--ink-soft);
+    font-size: 11px;
+  }
+
+  .resume-mark-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .legend-dot.red { background: #e52323; }
+  .legend-dot.orange { background: #e98a12; }
+  .legend-dot.green { background: #218a31; }
+
   .resume-mark {
     position: absolute;
-    z-index: 2;
+    z-index: 3;
     border: 0;
     border-radius: 3px;
     padding: 0;
-    background: rgb(255 35 35 / 55%);
     cursor: pointer;
   }
 
   .resume-mark.active {
-    background: rgb(255 145 92 / 58%);
+    filter: saturate(1.35);
+  }
+
+  .resume-item-mark {
+    position: absolute;
+    z-index: 2;
+    border-radius: 3px;
+    pointer-events: none;
   }
 
   .resume-mark:focus-visible {
