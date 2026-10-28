@@ -16,6 +16,11 @@
     return markColors[color] ?? markColors.orange
   }
 
+  function getIssueColor(issue) {
+    if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
+    return issue.color === 'red' ? 'red' : 'orange'
+  }
+
   let containerEl
   let pages = []
   let marks = []
@@ -102,6 +107,44 @@
     }
 
     return mergedMarks
+  }
+
+  function removeOverlappingMarks(marks) {
+    const colorPriority = { red: 0, orange: 1, green: 2 }
+    const sortedMarks = [...marks].sort((a, b) =>
+      (colorPriority[a.color] ?? 1) - (colorPriority[b.color] ?? 1) ||
+      Number(a.issueIndex === null) - Number(b.issueIndex === null) ||
+      a.width * a.height - b.width * b.height
+    )
+    const visibleMarks = []
+
+    for (const mark of sortedMarks) {
+      let fragments = [{ ...mark }]
+      for (const existing of visibleMarks) {
+        if (existing.pageNumber !== mark.pageNumber) continue
+        fragments = fragments.flatMap((fragment) => {
+          const left = Math.max(fragment.left, existing.left)
+          const top = Math.max(fragment.top, existing.top)
+          const right = Math.min(fragment.left + fragment.width, existing.left + existing.width)
+          const bottom = Math.min(fragment.top + fragment.height, existing.top + existing.height)
+          if (right - left <= 0.5 || bottom - top <= 0.5) return [fragment]
+
+          const pieces = [
+            { left: fragment.left, top: fragment.top, width: fragment.width, height: top - fragment.top },
+            { left: fragment.left, top: bottom, width: fragment.width, height: fragment.top + fragment.height - bottom },
+            { left: fragment.left, top, width: left - fragment.left, height: bottom - top },
+            { left: right, top, width: fragment.left + fragment.width - right, height: bottom - top },
+          ]
+          return pieces
+            .filter((piece) => piece.width > 0.5 && piece.height > 0.5)
+            .map((piece) => ({ ...fragment, ...piece }))
+        })
+        if (!fragments.length) break
+      }
+      visibleMarks.push(...fragments)
+    }
+
+    return visibleMarks
   }
 
   function cancelRendering() {
@@ -201,7 +244,7 @@
           nextMarks.push({
             issueIndex,
             itemIndex: null,
-            color: issue.color ?? (issue.kind === 'error' ? 'red' : 'orange'),
+            color: getIssueColor(issue),
             pageNumber: page.number,
             left: rect.left - pageRect.left,
             top: rect.top - pageRect.top + rect.height * 0.1,
@@ -213,7 +256,7 @@
     }
 
     if (generation === renderGeneration) {
-      marks = mergeAdjacentMarks(nextMarks)
+      marks = removeOverlappingMarks(mergeAdjacentMarks(nextMarks))
       const matchedIssues = new Set(nextMarks.filter((mark) => mark.issueIndex !== null).map((mark) => mark.issueIndex))
       if (issues.some((_, index) => !matchedIssues.has(index))) {
         highlightWarning = 'Some sections could not be matched to selectable text in this PDF. Every finding and solution is still listed alongside the preview.'
@@ -289,7 +332,7 @@
     <div>
       <p class="resume-preview-title font-display font-semibold">Your resume</p>
       <div class="resume-mark-legend" aria-label="Resume review colors">
-        <span><i class="legend-dot red"></i>Priority issue</span>
+        <span><i class="legend-dot red"></i>Missing / incorrect</span>
         <span><i class="legend-dot orange"></i>Needs strengthening</span>
         <span><i class="legend-dot green"></i>Role-relevant</span>
       </div>

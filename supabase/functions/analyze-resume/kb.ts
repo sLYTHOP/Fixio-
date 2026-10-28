@@ -80,11 +80,10 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
 
 const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
 
-// Red for errors and for a must-have that is missing. Everything else is weak: orange.
-export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
-  if (kind === "error") return "red"
-  const missing = kind === "missing" || (!kind && excerpt === null)
-  return missing && tier === "MH" ? "red" : "orange"
+// Red for errors and missing content. Weak content is orange.
+export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, _tier: Tier | null): IssueColor {
+  if (kind === "error" || kind === "missing" || (!kind && excerpt === null)) return "red"
+  return "orange"
 }
 
 export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {

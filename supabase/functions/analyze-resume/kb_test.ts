@@ -75,12 +75,12 @@ const item = (over: Partial<Item>): Item =>
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
-Deno.test("issueColor: error and missing must-have are red, the rest orange", () => {
+Deno.test("issueColor: errors and missing content are red, weak content is orange", () => {
   assert(issueColor("error", "x", null) === "red", "error is red")
   assert(issueColor("missing", null, "MH") === "red", "missing must-have is red")
+  assert(issueColor("missing", null, "SP") === "red", "missing preferred item is red")
+  assert(issueColor("missing", null, null) === "red", "missing without a knowledge base item is red")
   assert(issueColor(null, null, "MH") === "red", "no kind and no excerpt counts as missing")
-  assert(issueColor("missing", null, "SP") === "orange" && issueColor("missing", null, "NH") === "orange", "missing lower tier is orange")
-  assert(issueColor("missing", null, null) === "orange", "missing with no knowledge base item is orange")
   assert(issueColor("weak", "quote", "MH") === "orange" && issueColor(null, "quote", "MH") === "orange", "weak content is orange")
 })
 
