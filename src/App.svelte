@@ -14,7 +14,7 @@
   import OnboardingTour from './lib/OnboardingTour.svelte'
   import { initAnalytics, identifyUser, trackEvent } from './lib/analytics.js'
   import { joinWaitlist, supabase, signOut } from './lib/supabase.js'
-  import { stashPendingResume } from './lib/pendingResume.js'
+  import { hasPendingResume, stashPendingResume } from './lib/pendingResume.js'
   import {
     clearPendingWaitlistRole,
     getPendingWaitlistRole,
@@ -26,7 +26,7 @@
   let uploadError = ''
   let roleModalOpen = false
   let signInModalOpen = false
-  let view = 'landing' // 'landing' | 'preparing' | 'authenticating' | 'results'
+  let view = hasPendingResume() ? 'authenticating' : 'landing' // 'landing' | 'preparing' | 'authenticating' | 'results'
   let preparingAnalysis = false
   let pendingFile = null // held in memory between upload and role questionnaire
   let waitlistRole = ''
@@ -158,6 +158,9 @@
       } else if (getPendingWaitlistRole()) {
         waitlistRole = getPendingWaitlistRole()
         signInModalOpen = true
+      } else if (hasPendingResume()) {
+        view = 'authenticating'
+        signInModalOpen = true
       }
     })
 
@@ -167,6 +170,10 @@
       } else {
         user = null
         if (preparingAnalysis) return
+        if (hasPendingResume()) {
+          view = 'authenticating'
+          return
+        }
         view = 'landing'
         if (getPendingWaitlistRole()) {
           waitlistRole = getPendingWaitlistRole()

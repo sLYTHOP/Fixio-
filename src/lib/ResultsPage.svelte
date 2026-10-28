@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
+  import { fly } from 'svelte/transition'
   import { ArrowLeft, House, Sun, Moon, Check } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
@@ -190,7 +191,7 @@
         return
       }
       phraseIndex += 1
-    }, 5600)
+    }, 4000)
 
     const { data, error: fnError } = await supabase.functions.invoke('analyze-resume', {
       body: { role: roleMeta?.role, level: roleMeta?.level, resumePath: uploadData.path },
@@ -300,21 +301,20 @@
           <h1>Uploading your resume</h1>
 
         {:else if stage === 'processing'}
-          <ol class="analysis-steps" aria-label="Analysis in progress">
-            {#each phrases as phrase, i}
-              <li
-                class:complete={i < phraseIndex}
-                class:current={i === phraseIndex}
-                class:upcoming={i > phraseIndex}
-                aria-current={i === phraseIndex ? 'step' : undefined}
+          <div class="analysis-message-window" aria-live="polite" aria-atomic="true">
+            {#key phraseIndex}
+              <div
+                class="analysis-message"
+                in:fly={{ y: 30, duration: 850 }}
+                out:fly={{ y: -30, duration: 850 }}
               >
                 <span class="analysis-step-icon" aria-hidden="true">
                   <Check size={18} strokeWidth={2.5} />
                 </span>
-                <span class="analysis-step-label">{phrase}</span>
-              </li>
-            {/each}
-          </ol>
+                <span class="analysis-step-label">{phrases[phraseIndex]}</span>
+              </div>
+            {/key}
+          </div>
 
         {:else if stage === 'error'}
           <p class="state-eyebrow error-eyebrow">We couldn’t finish your review</p>
@@ -811,24 +811,23 @@
     color: var(--coral);
   }
 
-  .analysis-steps {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    width: min(100%, 520px);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    text-align: left;
+  .analysis-message-window {
+    display: grid;
+    width: min(100%, 620px);
+    height: 92px;
+    margin: 0 auto;
+    overflow: hidden;
+    align-items: center;
   }
 
-  .analysis-steps li {
+  .analysis-message {
     display: grid;
+    grid-area: 1 / 1;
     grid-template-columns: 38px minmax(0, 1fr);
     align-items: center;
-    gap: 20px;
-    color: var(--ink-soft);
-    transition: color .35s ease, opacity .35s ease;
+    gap: 22px;
+    color: var(--ink);
+    text-align: left;
   }
 
   .analysis-step-icon {
@@ -838,8 +837,7 @@
     place-items: center;
     border: 2px solid currentColor;
     border-radius: 50%;
-    color: inherit;
-    transition: color .35s ease, background-color .35s ease, border-color .35s ease, transform .35s ease;
+    color: var(--ink);
   }
 
   .analysis-step-label {
@@ -848,47 +846,6 @@
     font-weight: 500;
     letter-spacing: -.025em;
     line-height: 1.25;
-    transition: opacity .35s ease, transform .35s ease;
-  }
-
-  .analysis-steps li.complete {
-    color: var(--accent);
-  }
-
-  .analysis-steps li.complete .analysis-step-icon {
-    border-color: #fff;
-    background: #fff;
-    color: #43d8b8;
-  }
-
-  .analysis-steps li.current {
-    color: var(--ink);
-  }
-
-  .analysis-steps li.current .analysis-step-icon {
-    border-color: currentColor;
-    animation: analysis-step-pulse 2.2s ease-in-out infinite;
-  }
-
-  .analysis-steps li.upcoming {
-    opacity: .42;
-  }
-
-  @keyframes analysis-step-pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.08); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .analysis-steps li,
-    .analysis-step-icon,
-    .analysis-step-label {
-      transition: none;
-    }
-
-    .analysis-steps li.current .analysis-step-icon {
-      animation: none;
-    }
   }
 
   .review-intro {
