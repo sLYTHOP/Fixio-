@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
-  import { ArrowLeft, House, Sun, Moon } from '@lucide/svelte'
+  import { ArrowLeft, House, Sun, Moon, Check } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -185,8 +185,12 @@
     trackEvent('resume_uploaded_success')
     stage = 'processing'
     phraseTimer = setInterval(() => {
-      phraseIndex = (phraseIndex + 1) % phrases.length
-    }, 3200)
+      if (phraseIndex >= phrases.length - 1) {
+        clearInterval(phraseTimer)
+        return
+      }
+      phraseIndex += 1
+    }, 5600)
 
     const { data, error: fnError } = await supabase.functions.invoke('analyze-resume', {
       body: { role: roleMeta?.role, level: roleMeta?.level, resumePath: uploadData.path },
@@ -286,7 +290,7 @@
 
   {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
     <div class="state-wrap">
-      <div class="state-card">
+      <div class="state-card" class:processing-state={stage === 'processing'}>
         {#if stage === 'loading'}
           <p class="state-eyebrow">Your workspace</p>
           <h1>Loading your recent analysis</h1>
@@ -296,13 +300,21 @@
           <h1>Uploading your resume</h1>
 
         {:else if stage === 'processing'}
-          <p class="state-eyebrow">Step 2 of 2</p>
-          <h1>{phrases[phraseIndex]}</h1>
-          <div class="progress-dots" aria-label="Analysis in progress">
-            {#each phrases as _, i}
-              <span class:active={i === phraseIndex}></span>
+          <ol class="analysis-steps" aria-label="Analysis in progress">
+            {#each phrases as phrase, i}
+              <li
+                class:complete={i < phraseIndex}
+                class:current={i === phraseIndex}
+                class:upcoming={i > phraseIndex}
+                aria-current={i === phraseIndex ? 'step' : undefined}
+              >
+                <span class="analysis-step-icon" aria-hidden="true">
+                  <Check size={18} strokeWidth={2.5} />
+                </span>
+                <span class="analysis-step-label">{phrase}</span>
+              </li>
             {/each}
-          </div>
+          </ol>
 
         {:else if stage === 'error'}
           <p class="state-eyebrow error-eyebrow">We couldn’t finish your review</p>
@@ -763,12 +775,18 @@
     text-align: center;
   }
 
+  .state-card.processing-state {
+    border-color: transparent;
+    background: transparent;
+    padding: 24px;
+  }
+
   .state-eyebrow,
   .eyebrow {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 0;
+    margin: 0 auto;
     color: var(--accent);
     font-size: 10px;
     font-weight: 750;
@@ -793,22 +811,84 @@
     color: var(--coral);
   }
 
-  .progress-dots {
+  .analysis-steps {
     display: flex;
-    justify-content: center;
-    gap: 6px;
-    margin-top: 22px;
+    flex-direction: column;
+    gap: 24px;
+    width: min(100%, 520px);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    text-align: left;
   }
 
-  .progress-dots span {
-    width: 7px;
-    height: 7px;
+  .analysis-steps li {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 20px;
+    color: var(--ink-soft);
+    transition: color .35s ease, opacity .35s ease;
+  }
+
+  .analysis-step-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border: 2px solid currentColor;
     border-radius: 50%;
-    background: var(--line);
+    color: inherit;
+    transition: color .35s ease, background-color .35s ease, border-color .35s ease, transform .35s ease;
   }
 
-  .progress-dots span.active {
-    background: var(--lime);
+  .analysis-step-label {
+    font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+    font-size: clamp(18px, 2.8vw, 25px);
+    font-weight: 500;
+    letter-spacing: -.025em;
+    line-height: 1.25;
+    transition: opacity .35s ease, transform .35s ease;
+  }
+
+  .analysis-steps li.complete {
+    color: var(--accent);
+  }
+
+  .analysis-steps li.complete .analysis-step-icon {
+    border-color: #fff;
+    background: #fff;
+    color: #43d8b8;
+  }
+
+  .analysis-steps li.current {
+    color: var(--ink);
+  }
+
+  .analysis-steps li.current .analysis-step-icon {
+    border-color: currentColor;
+    animation: analysis-step-pulse 2.2s ease-in-out infinite;
+  }
+
+  .analysis-steps li.upcoming {
+    opacity: .42;
+  }
+
+  @keyframes analysis-step-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .analysis-steps li,
+    .analysis-step-icon,
+    .analysis-step-label {
+      transition: none;
+    }
+
+    .analysis-steps li.current .analysis-step-icon {
+      animation: none;
+    }
   }
 
   .review-intro {

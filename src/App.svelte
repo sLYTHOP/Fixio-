@@ -26,7 +26,8 @@
   let uploadError = ''
   let roleModalOpen = false
   let signInModalOpen = false
-  let view = 'landing' // 'landing' | 'authenticating' | 'results'
+  let view = 'landing' // 'landing' | 'preparing' | 'authenticating' | 'results'
+  let preparingAnalysis = false
   let pendingFile = null // held in memory between upload and role questionnaire
   let waitlistRole = ''
   let waitlistNotice = ''
@@ -133,6 +134,7 @@
     user = authenticatedUser
     identifyUser(authenticatedUser)
     signInModalOpen = false
+    if (preparingAnalysis) return
     if (getPendingWaitlistRole()) {
       waitlistNotice = ''
       waitlistError = ''
@@ -164,6 +166,7 @@
         handleAuthenticated(session.user)
       } else {
         user = null
+        if (preparingAnalysis) return
         view = 'landing'
         if (getPendingWaitlistRole()) {
           waitlistRole = getPendingWaitlistRole()
@@ -187,9 +190,26 @@
   }
 
   async function handleRoleSubmit(meta) {
-    await stashPendingResume(pendingFile, meta)
-    pendingFile = null
+    if (!pendingFile) {
+      uploadError = 'We could not find the selected resume. Please choose it again.'
+      return
+    }
+
+    preparingAnalysis = true
     roleModalOpen = false
+    view = 'preparing'
+    try {
+      await stashPendingResume(pendingFile, meta)
+    } catch (error) {
+      console.error('[App] failed to prepare resume analysis', error)
+      preparingAnalysis = false
+      view = 'landing'
+      uploadError = 'We could not prepare your resume. Please try uploading it again.'
+      return
+    }
+
+    pendingFile = null
+    preparingAnalysis = false
     if (user) {
       view = 'results'
     } else {
@@ -237,6 +257,10 @@
 {:else if view === 'authenticating'}
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
     <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
+  </main>
+{:else if view === 'preparing'}
+  <main class="flex min-h-screen items-center justify-center px-6 text-center">
+    <p class="font-display text-xl font-semibold">Getting your analysis ready...</p>
   </main>
 {:else}
   <main>
