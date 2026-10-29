@@ -127,25 +127,31 @@
   ]
   let phraseIndex = 0
   let phraseTimer
+  let phraseAdvanceTimer
   let finishPhraseSequence = null
+  let completedPhraseIndexes = new Set()
 
   function startAnalysisMessages() {
     phraseIndex = 0
+    completedPhraseIndexes = new Set()
     return new Promise((resolve) => {
       finishPhraseSequence = resolve
       phraseTimer = setInterval(() => {
-        if (phraseIndex === phrases.length - 1) {
-          finishAnalysisMessages()
-        } else {
-          phraseIndex += 1
-        }
+        completedPhraseIndexes = new Set(completedPhraseIndexes).add(phraseIndex)
+        phraseAdvanceTimer = setTimeout(() => {
+          phraseAdvanceTimer = null
+          if (phraseIndex === phrases.length - 1) finishAnalysisMessages()
+          else phraseIndex += 1
+        }, 280)
       }, 3000)
     })
   }
 
   function finishAnalysisMessages() {
     clearInterval(phraseTimer)
+    clearTimeout(phraseAdvanceTimer)
     phraseTimer = null
+    phraseAdvanceTimer = null
     finishPhraseSequence?.()
     finishPhraseSequence = null
   }
@@ -342,7 +348,11 @@
                 in:fly={{ y: 26, duration: 500, delay: 450 }}
                 out:fly={{ y: -26, duration: 450 }}
               >
-                <span class="analysis-step-icon" aria-hidden="true">
+                <span
+                  class="analysis-step-icon"
+                  class:complete={completedPhraseIndexes.has(phraseIndex)}
+                  aria-hidden="true"
+                >
                   <Check size={18} strokeWidth={2.5} />
                 </span>
                 <span class="analysis-step-label">{phrases[phraseIndex]}</span>
@@ -888,6 +898,13 @@
     border: 2px solid currentColor;
     border-radius: 50%;
     color: var(--ink);
+    transition: background-color .25s ease, border-color .25s ease, color .25s ease;
+  }
+
+  .analysis-step-icon.complete {
+    border-color: var(--lime);
+    background: var(--lime);
+    color: var(--paper);
   }
 
   .analysis-step-label {
