@@ -80,10 +80,11 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
 
 const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
 
-// Red for errors and missing content. Weak content is orange.
-export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, _tier: Tier | null): IssueColor {
-  if (kind === "error" || kind === "missing" || (!kind && excerpt === null)) return "red"
-  return "orange"
+// Red for errors and for a must-have that is missing. Everything else is weak: orange.
+export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
+  if (kind === "error") return "red"
+  const missing = kind === "missing" || (!kind && excerpt === null)
+  return missing && tier === "MH" ? "red" : "orange"
 }
 
 export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
@@ -111,20 +112,28 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
   // 1. Every weak or irrelevant item becomes an issue.
   const fromItems: FinalIssue[] = parsed.items
     .filter((it) => it.verdict !== "relevant")
-    .map((it) => make({
-      section: it.section,
-      excerpt: it.excerpt,
-      issue: it.issue ?? "",
-      solution: it.solution ?? "",
-      kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
-      kind: "weak",
-    }, "orange"))
+    .map((it) => ({
+      // A weak or irrelevant item is not a gap, so it carries no "seen in N postings" label.
+      ...make({
+        section: it.section,
+        excerpt: it.excerpt,
+        issue: it.issue ?? "",
+        solution: it.solution ?? "",
+        kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
+        kind: "weak",
+      }, "orange"),
+      basis: null,
+      priority: "medium" as Priority,
+    }))
 
   // 2. The model's own issues cover what no single item can show: missing content, date errors,
   // formatting. An issue about text already covered by an item is dropped as a duplicate.
   const covered = new Set(fromItems.map((i) => norm(i.excerpt)).filter(Boolean))
+  // An issue about a must-have the model itself marked present is a contradiction: dropped.
+  const presentMust = new Set((summary?.items ?? []).filter((m) => m.status === "present").map((m) => m.id))
   const fromModel: FinalIssue[] = parsed.issues
     .filter((it) => !(it.excerpt && covered.has(norm(it.excerpt))))
+    .filter((it) => !(it.kbItem && presentMust.has(it.kbItem.toUpperCase())))
     .map((it) => make(it))
 
   const all: FinalIssue[] = [...fromItems, ...fromModel]
@@ -183,6 +192,17 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
     green: items.filter((i) => i.color === "green").length,
   }
 
-  const { mustHaves: _m, issues: _i, items: _it, ...rest } = parsed
-  return { ...rest, issues, items, colorCounts, mustHaveSummary: summary }
+  // At most 6 suggestions, no repeats, and none that just repeats an issue's own fix.
+  const seen = new Set(issues.map((i) => norm(i.solution)))
+  const suggestions: string[] = []
+  for (const text of parsed.suggestions) {
+    const key = norm(text)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    suggestions.push(text)
+    if (suggestions.length === 6) break
+  }
+
+  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, ...rest } = parsed
+  return { ...rest, suggestions, issues, items, colorCounts, mustHaveSummary: summary }
 }

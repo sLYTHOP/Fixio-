@@ -1,0 +1,173 @@
+diff --git a/supabase/functions/analyze-resume/index.ts b/supabase/functions/analyze-resume/index.ts
+index 7800510..15a1abe 100644
+--- a/supabase/functions/analyze-resume/index.ts
++++ b/supabase/functions/analyze-resume/index.ts
+@@ -21,7 +21,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
+ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+ const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+ // Bump when analysis prompt or output semantics change.
+-const ANALYSIS_VERSION = "2"
++const ANALYSIS_VERSION = "3"
+ 
+ async function sha256Hex(bytes: Uint8Array) {
+   const digest = await crypto.subtle.digest("SHA-256", bytes)
+@@ -158,17 +158,20 @@ ${kb.content}
+ Instructions:
+ - Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
+ - Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
+-- Split the resume into items and give EVERY item a verdict under "items". One item for each: skill listed in a skills section (quote the skill itself), experience entry (a job or internship, taken as a whole), project, certification or course, and education entry, plus one for any other section that carries content (summary, achievements). Do not leave any of them out.
+-- Verdicts: "relevant" = clearly shows something this role asks for in the knowledge base. "weak" = related to the role but thin, basic or vague, or only partly showing what the role asks for (for example an internship outside SOC work, or a certification the postings do not name). "irrelevant" = shows nothing this role asks for (a buzzword with no tool or context such as "AI", a skill SOC teams do not use, an entry unrelated to security).
+-- Work outside SOC (for example penetration testing or an unrelated internship) is "weak", not "irrelevant", when it still shows items the knowledge base asks for, such as vulnerability work, networking, logs or documentation. Say which items it supports in kbItems, and what the candidate should add to link it to SOC work.
+-- Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak". If the knowledge base has a certification ladder, use it: in the solution for a weak certification, name the next step on the ladder. Never invent certifications the knowledge base does not mention.
+-- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact, contiguous quote copied from the resume; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (a concrete, role-relevant fix, one or two sentences). For "relevant" items, issue and solution are null.
+-- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence).
++- Split the resume into items and give EVERY item a verdict under "items", so that all the content of the resume is covered. One item for each: skill or group of skills on one line of a skills section, bullet point under an experience entry or project (one item per bullet), certification or course, line of education detail, and sentence or line of a summary or profile. Do not make items for the candidate's name, contact details, section headings, dates, or employer and institution names.
++- Verdicts: "relevant" = clearly shows something this role asks for in the knowledge base. "weak" = related to the role but thin, basic, vague or only partly showing what the role asks for. "irrelevant" = shows nothing this role asks for.
++- Judge the resume as a whole. Skills that are not SOC-specific but are normal in security teams today (for example AI or prompt engineering, research skills, analytical reasoning, communication) are fine and count as "relevant" when the rest of the resume is on topic. Flag a non-security skill (for example product management) as "weak" only because it takes space from relevant skills, and say so gently. If most of the resume is off-topic, say that plainly instead.
++- Security skills that SOC teams use less (for example offensive testing tools) are "relevant" when the resume also shows related work such as vulnerability assessment.
++- A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
++- Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
++- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null.
++- Tone of every issue and solution: polite and encouraging, written to the candidate ("consider", "you could"). Never say "remove", "replace" or "list this under" without saying exactly which words are meant and what to put instead. Name the exact skill, bullet, project or certification the fix is about. For an item in a skills list, never tell the candidate to "explain how it was used": a skills list only holds keywords. Suggest showing it in a bullet instead.
++- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). Never raise an issue about a must-have you marked "present".
+ - Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
+-- Where the resume is already strong in an area, mark the items "relevant" and say so under strengths (short phrases of at most 12 words). Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
++- Where the resume is already strong in an area, mark the items "relevant" and say so under strengths, as plain short phrases of at most 12 words with no praise words such as "gold-standard". Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
+ - Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
+ - Also flag resume bullet points that read as vague or generic (lacking tools, scale or outcome), up to 5. Never accuse the candidate of lying. Note what an interviewer would ask and what detail would make the bullet convincing.
+-- Give 2-4 concrete suggestions (certs, projects, learning paths) drawn from the knowledge base to close the real gaps.
++- Give 4-6 suggestions under "suggestions", ordered by impact for THIS resume, each naming the exact item it is about and drawn from the knowledge base. Order: finishing certifications that are in progress first; then fixes for missing must-haves; then linking off-target projects or experience to SOC work; then writing stronger SOC-focused bullets; then further learning. Do not repeat what an issue already says word for word.
+ - Keep every sentence short. Respond with ONLY valid JSON, no prose before or after, in this exact shape:
+ {
+   "strengths": ["short phrase", "..."],
+diff --git a/supabase/functions/analyze-resume/kb.ts b/supabase/functions/analyze-resume/kb.ts
+index 7670f2d..6055c26 100644
+--- a/supabase/functions/analyze-resume/kb.ts
++++ b/supabase/functions/analyze-resume/kb.ts
+@@ -80,10 +80,11 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
+ 
+ const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
+ 
+-// Red for errors and missing content. Weak content is orange.
+-export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, _tier: Tier | null): IssueColor {
+-  if (kind === "error" || kind === "missing" || (!kind && excerpt === null)) return "red"
+-  return "orange"
++// Red for errors and for a must-have that is missing. Everything else is weak: orange.
++export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
++  if (kind === "error") return "red"
++  const missing = kind === "missing" || (!kind && excerpt === null)
++  return missing && tier === "MH" ? "red" : "orange"
+ }
+ 
+ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
+@@ -111,20 +112,28 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback
+   // 1. Every weak or irrelevant item becomes an issue.
+   const fromItems: FinalIssue[] = parsed.items
+     .filter((it) => it.verdict !== "relevant")
+-    .map((it) => make({
+-      section: it.section,
+-      excerpt: it.excerpt,
+-      issue: it.issue ?? "",
+-      solution: it.solution ?? "",
+-      kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
+-      kind: "weak",
+-    }, "orange"))
++    .map((it) => ({
++      // A weak or irrelevant item is not a gap, so it carries no "seen in N postings" label.
++      ...make({
++        section: it.section,
++        excerpt: it.excerpt,
++        issue: it.issue ?? "",
++        solution: it.solution ?? "",
++        kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
++        kind: "weak",
++      }, "orange"),
++      basis: null,
++      priority: "medium" as Priority,
++    }))
+ 
+   // 2. The model's own issues cover what no single item can show: missing content, date errors,
+   // formatting. An issue about text already covered by an item is dropped as a duplicate.
+   const covered = new Set(fromItems.map((i) => norm(i.excerpt)).filter(Boolean))
++  // An issue about a must-have the model itself marked present is a contradiction: dropped.
++  const presentMust = new Set((summary?.items ?? []).filter((m) => m.status === "present").map((m) => m.id))
+   const fromModel: FinalIssue[] = parsed.issues
+     .filter((it) => !(it.excerpt && covered.has(norm(it.excerpt))))
++    .filter((it) => !(it.kbItem && presentMust.has(it.kbItem.toUpperCase())))
+     .map((it) => make(it))
+ 
+   const all: FinalIssue[] = [...fromItems, ...fromModel]
+@@ -183,6 +192,17 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback
+     green: items.filter((i) => i.color === "green").length,
+   }
+ 
+-  const { mustHaves: _m, issues: _i, items: _it, ...rest } = parsed
+-  return { ...rest, issues, items, colorCounts, mustHaveSummary: summary }
++  // At most 6 suggestions, no repeats, and none that just repeats an issue's own fix.
++  const seen = new Set(issues.map((i) => norm(i.solution)))
++  const suggestions: string[] = []
++  for (const text of parsed.suggestions) {
++    const key = norm(text)
++    if (!key || seen.has(key)) continue
++    seen.add(key)
++    suggestions.push(text)
++    if (suggestions.length === 6) break
++  }
++
++  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, ...rest } = parsed
++  return { ...rest, suggestions, issues, items, colorCounts, mustHaveSummary: summary }
+ }
+diff --git a/supabase/functions/analyze-resume/kb_test.ts b/supabase/functions/analyze-resume/kb_test.ts
+index a0bbd98..3cf4e25 100644
+--- a/supabase/functions/analyze-resume/kb_test.ts
++++ b/supabase/functions/analyze-resume/kb_test.ts
+@@ -75,12 +75,12 @@ const item = (over: Partial<Item>): Item =>
+ const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
+   ({ ...base(issues, mustHaves), items })
+ 
+-Deno.test("issueColor: errors and missing content are red, weak content is orange", () => {
++Deno.test("issueColor: error and missing must-have are red, the rest orange", () => {
+   assert(issueColor("error", "x", null) === "red", "error is red")
+   assert(issueColor("missing", null, "MH") === "red", "missing must-have is red")
+-  assert(issueColor("missing", null, "SP") === "red", "missing preferred item is red")
+-  assert(issueColor("missing", null, null) === "red", "missing without a knowledge base item is red")
+   assert(issueColor(null, null, "MH") === "red", "no kind and no excerpt counts as missing")
++  assert(issueColor("missing", null, "SP") === "orange" && issueColor("missing", null, "NH") === "orange", "missing lower tier is orange")
++  assert(issueColor("missing", null, null) === "orange", "missing with no knowledge base item is orange")
+   assert(issueColor("weak", "quote", "MH") === "orange" && issueColor(null, "quote", "MH") === "orange", "weak content is orange")
+ })
+ 
+@@ -93,8 +93,9 @@ Deno.test("every weak or irrelevant item becomes an orange issue, relevant items
+   ]), kb)
+   assert(out.issues.length === 2 && out.issues.every((i) => i.color === "orange"), "two orange issues")
+   const vapt = out.issues.find((i) => i.excerpt === "VAPT intern")!
+-  assert(vapt.kbItem === "SP1" && vapt.priority === "medium" && vapt.basis === "required in 4 of 9 postings, an advantage in 2 more", "first known knowledge base item is used")
+-  assert(out.issues.find((i) => i.excerpt === "AI")!.basis === "general practice, not from the job postings", "no item: general practice")
++  assert(vapt.kbItem === "SP1", "first known knowledge base item is used")
++  assert(vapt.basis === null && vapt.priority === "medium", "an item issue carries no posting label")
++  assert(out.issues.find((i) => i.excerpt === "AI")!.kbItem === null, "no item: no knowledge base id")
+   assert(out.items.map((i) => i.color).join() === "green,orange,orange", "item colors")
+   assert(out.items[0].kbItems.join() === "MH1", "unknown ids dropped from items")
+   assert(out.colorCounts.red === 0 && out.colorCounts.orange === 2 && out.colorCounts.green === 1, "counts")
+@@ -149,3 +150,21 @@ Deno.test("no knowledge base ids at all: items still become issues without a sou
+   const out = finalizeFeedback(withItems([item({ verdict: "weak", issue: "i", solution: "s" })]), parseKnowledgeBase("plain text"))
+   assert(out.issues[0].basis === null && out.issues[0].color === "orange" && out.mustHaveSummary === null, "unlabelled")
+ })
++
++Deno.test("an issue about a must-have the model marked present is dropped", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([], [{ id: "MH2", status: "present", evidence: "triage" }],
++    [
++      { section: "SKILLS", excerpt: null, issue: "no ticketing tool", solution: "add one", kbItem: "MH2", kind: "missing" },
++      { section: "SKILLS", excerpt: null, issue: "no scripting", solution: "add one", kbItem: "SP1", kind: "missing" },
++    ]), kb)
++  assert(out.issues.length === 1 && out.issues[0].kbItem === "SP1", "only the unrelated issue stays")
++})
++
++Deno.test("suggestions: capped at 6, no repeats, none that repeats an issue fix", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([item({ verdict: "weak", issue: "i", solution: "Add a triage write-up." })])
++  parsed.suggestions = ["Finish Security+.", " finish security+. ", "add a TRIAGE write-up.", "b", "c", "d", "e", "f", "g"]
++  const out = finalizeFeedback(parsed, kb)
++  assert(out.suggestions.join("|") === "Finish Security+.|b|c|d|e|f", "got " + out.suggestions.join("|"))
++})

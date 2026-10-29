@@ -28,6 +28,26 @@
   let feedback = null // real result from analyze-resume: { strengths, gaps, suggestions, vagueBullets }
   let resultsTheme = 'dark'
 
+  const reviewColors = [
+    { color: 'red', label: 'Fix first' },
+    { color: 'orange', label: 'Weak' },
+    { color: 'green', label: 'Looks right' },
+  ]
+
+  function getIssueColor(issue) {
+    if (issue.color !== undefined && issue.color !== null) {
+      return issue.color === 'red' ? 'red' : 'orange'
+    }
+    if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
+    return 'orange'
+  }
+
+  function getIssueColorLabel(issue) {
+    return reviewColors.find(({ color }) => color === getIssueColor(issue))?.label ?? 'Weak'
+  }
+
+  $: showColorCounts = reviewColors.every(({ color }) => Number.isFinite(feedback?.colorCounts?.[color]))
+
   function setResultsTheme(theme) {
     resultsTheme = theme
     try {
@@ -484,7 +504,20 @@
           {/if}
         </span>
         <div class="summary-copy">
-          <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
+          {#if showColorCounts}
+            <h2>Review breakdown</h2>
+            <div class="summary-color-legend" aria-label="Review color counts">
+              {#each reviewColors as { color, label }}
+                <span class="summary-color-count">
+                  <i class="color-dot {color}" aria-hidden="true"></i>
+                  <strong>{feedback.colorCounts[color]}</strong>
+                  <span>{label}</span>
+                </span>
+              {/each}
+            </div>
+          {:else}
+            <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
+          {/if}
         </div>
         <div class="summary-strengths">
           <strong>{feedback.strengths.length}</strong>
@@ -521,6 +554,10 @@
                     <span class="issue-heading">
                       <span class="issue-number">{i + 1}</span>
                       <span class="issue-section">{issue.section}</span>
+                      <span class="issue-color-label">
+                        <i class="issue-color-marker {getIssueColor(issue)}" aria-hidden="true"></i>
+                        {getIssueColorLabel(issue)}
+                      </span>
                       <span class="issue-chevron" aria-hidden="true">{activeIssue === i ? '⌄' : '›'}</span>
                     </span>
                     <span class="issue-title">{issue.issue}</span>
@@ -553,20 +590,19 @@
 
       <section data-tour="next-steps" class="review-card next-steps-card">
         {#if feedback.suggestions.length || feedback.issues.length}
-          <div class="next-steps-heading">
-            <span class="next-steps-icon" aria-hidden="true">↗</span>
-            <div>
-              <h2>Suggestions</h2>
+          {#if feedback.suggestions.length}
+            <div class="next-steps-heading">
+              <span class="next-steps-icon" aria-hidden="true">↗</span>
+              <div>
+                <h2>Suggestions</h2>
+              </div>
             </div>
-          </div>
-          <ol class="next-steps-list">
-            {#each feedback.suggestions as suggestion, i}
-              <li><span class="step-number">{String(i + 1).padStart(2, '0')}</span><span>{suggestion}</span></li>
-            {/each}
-            {#each feedback.issues as issue, i}
-              <li><span class="step-number">{String(feedback.suggestions.length + i + 1).padStart(2, '0')}</span><span>{issue.solution}</span></li>
-            {/each}
-          </ol>
+            <ol class="next-steps-list">
+              {#each feedback.suggestions as suggestion, i}
+                <li><span class="step-number">{String(i + 1).padStart(2, '0')}</span><span>{suggestion}</span></li>
+              {/each}
+            </ol>
+          {/if}
         {/if}
 
         <div data-tour="roadmap" class="roadmap-followup">
@@ -940,6 +976,41 @@
     font-weight: 700;
   }
 
+  .summary-color-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+  }
+
+  .summary-color-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ink-soft);
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .summary-color-count strong {
+    color: var(--ink);
+    font-size: 10px;
+  }
+
+  .color-dot,
+  .issue-color-marker {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 50%;
+  }
+
+  .color-dot.red,
+  .issue-color-marker.red { background: #e52323; }
+  .color-dot.orange,
+  .issue-color-marker.orange { background: #e98a12; }
+  .color-dot.green,
+  .issue-color-marker.green { background: #218a31; }
+
   .summary-strengths {
     min-width: 78px;
     padding-left: 15px;
@@ -1037,6 +1108,7 @@
 
   .issue-heading {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 7px;
   }
@@ -1060,6 +1132,16 @@
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
+  }
+
+  .issue-color-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ink-soft);
+    font-size: 9px;
+    font-weight: 650;
+    white-space: nowrap;
   }
 
   .issue-chevron {

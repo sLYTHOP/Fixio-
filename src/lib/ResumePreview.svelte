@@ -17,8 +17,11 @@
   }
 
   function getIssueColor(issue) {
+    if (issue.color !== undefined && issue.color !== null) {
+      return issue.color === 'red' ? 'red' : 'orange'
+    }
     if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
-    return issue.color === 'red' ? 'red' : 'orange'
+    return 'orange'
   }
 
   let containerEl
@@ -35,6 +38,8 @@
   let renderTasks = []
   let hoveredIssue = null
   let lastNavigatedIssue = null
+  let loggedUnmatchedExcerpts = new Set()
+  let lastCoverageLog = ''
 
   $: visibleIssue = hoveredIssue ?? activeIssue
   $: activeMark = visibleIssue === null
@@ -49,32 +54,75 @@
       .trim()
   }
 
-  function findItemIndexes(items, query) {
+  function findTextMatches(items, query) {
     const normalizedQuery = normalizeText(query)
     if (!normalizedQuery) return []
 
     let normalizedText = ''
-    const itemIndexes = []
+    const positions = []
     items.forEach((item, itemIndex) => {
-      for (const char of item.normalize('NFKC').toLowerCase()) {
-        if (/[\p{L}\p{N}]/u.test(char)) {
-          normalizedText += char
-          itemIndexes.push(itemIndex)
-        } else if (normalizedText && !normalizedText.endsWith(' ')) {
-          normalizedText += ' '
-          itemIndexes.push(itemIndex)
+      let rawOffset = 0
+      for (const rawCharacter of item) {
+        const start = rawOffset
+        rawOffset += rawCharacter.length
+        for (const character of rawCharacter.normalize('NFKC').toLowerCase()) {
+          if (/[\p{L}\p{N}]/u.test(character)) {
+            normalizedText += character
+            positions.push({ itemIndex, start, end: rawOffset })
+          } else if (normalizedText && !normalizedText.endsWith(' ')) {
+            normalizedText += ' '
+            positions.push({ itemIndex, start, end: rawOffset })
+          }
         }
       }
       if (normalizedText && !normalizedText.endsWith(' ')) {
         normalizedText += ' '
-        itemIndexes.push(itemIndex)
+        positions.push(null)
       }
     })
 
     const start = normalizedText.indexOf(normalizedQuery)
     if (start < 0) return []
     const end = start + normalizedQuery.length
-    return [...new Set(itemIndexes.slice(start, end))]
+    const rangesByItem = new Map()
+    for (const position of positions.slice(start, end)) {
+      if (!position) continue
+      const current = rangesByItem.get(position.itemIndex)
+      if (current) {
+        current.start = Math.min(current.start, position.start)
+        current.end = Math.max(current.end, position.end)
+      } else {
+        rangesByItem.set(position.itemIndex, { ...position })
+      }
+    }
+    return [...rangesByItem].map(([itemIndex, range]) => ({ itemIndex, ...range }))
+  }
+
+  function getTextRects(textDiv, start, end) {
+    const textNodes = []
+    const walker = document.createTreeWalker(textDiv, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) textNodes.push(walker.currentNode)
+
+    const range = document.createRange()
+    let offset = 0
+    let rangeStart = null
+    let rangeEnd = null
+    for (const node of textNodes) {
+      const nodeEnd = offset + node.textContent.length
+      if (rangeStart === null && start < nodeEnd) {
+        rangeStart = { node, offset: Math.max(0, start - offset) }
+      }
+      if (end <= nodeEnd) {
+        rangeEnd = { node, offset: Math.max(0, end - offset) }
+        break
+      }
+      offset = nodeEnd
+    }
+    if (!rangeStart || !rangeEnd) return []
+
+    range.setStart(rangeStart.node, rangeStart.offset)
+    range.setEnd(rangeEnd.node, rangeEnd.offset)
+    return [...range.getClientRects()]
   }
 
   function mergeAdjacentMarks(marks) {
@@ -90,8 +138,8 @@
         ) return false
         const candidateCenter = candidate.top + candidate.height / 2
         const sameLine = Math.abs(candidateCenter - markCenter) <= Math.min(candidate.height, mark.height) * 0.5
-        const touchesHorizontally = mark.left <= candidate.left + candidate.width + 3
-          && mark.left + mark.width >= candidate.left - 3
+        const touchesHorizontally = mark.left <= candidate.left + candidate.width
+          && mark.left + mark.width >= candidate.left
         return sameLine && touchesHorizontally
       })
 
@@ -172,6 +220,41 @@
 
     const nextMarks = []
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    const matchedItemExcerpts = new Set()
+    const matchedIssueExcerpts = new Set()
+    const coveredCharacters = new Set()
+    let totalResumeCharacters = 0
+
+    function recordCoverage(pageNumber, itemIndex, start, end) {
+      for (let characterIndex = start; characterIndex < end; characterIndex++) {
+        coveredCharacters.add(`${pageNumber}:${itemIndex}:${characterIndex}`)
+      }
+    }
+
+    function addTextMarks({ textLayer, pageRect, pageNumber, matches, color, issueIndex, itemIndex }) {
+      matches.forEach((match) => {
+        const textDiv = textLayer.textDivs[match.itemIndex]
+        if (!textDiv) return
+        const rects = getTextRects(textDiv, match.start, match.end)
+        rects.forEach((rect) => {
+          if (!rect.width || !rect.height) return
+          nextMarks.push({
+            itemIndex,
+            textItemIndex: match.itemIndex,
+            issueIndex,
+            color,
+            pageNumber,
+            left: rect.left - pageRect.left,
+            top: rect.top - pageRect.top + rect.height * 0.1,
+            width: rect.width,
+            height: rect.height * 0.8,
+          })
+        })
+        if (rects.some((rect) => rect.width && rect.height)) {
+          recordCoverage(pageNumber, match.itemIndex, match.start, match.end)
+        }
+      })
+    }
 
     for (const page of pages) {
       if (generation !== renderGeneration) return
@@ -210,58 +293,70 @@
       await textLayer.render()
 
       const pageRect = wrapper.getBoundingClientRect()
+      totalResumeCharacters += textLayer.textContentItemsStr.reduce((total, text) => total + text.length, 0)
       items.forEach((item, itemIndex) => {
         if (!item.excerpt) return
-        findItemIndexes(textLayer.textContentItemsStr, item.excerpt).forEach((itemTextIndex) => {
-          const textDiv = textLayer.textDivs[itemTextIndex]
-          if (!textDiv) return
-          const rect = textDiv.getBoundingClientRect()
-          if (!rect.width || !rect.height) return
-          nextMarks.push({
-            itemIndex,
-            issueIndex: null,
-            color: item.color ?? (item.verdict === 'relevant' ? 'green' : 'orange'),
+        const matches = findTextMatches(textLayer.textContentItemsStr, item.excerpt)
+        if (matches.length) {
+          matchedItemExcerpts.add(itemIndex)
+          addTextMarks({
+            textLayer,
+            pageRect,
             pageNumber: page.number,
-            left: rect.left - pageRect.left,
-            top: rect.top - pageRect.top + rect.height * 0.1,
-            width: rect.width,
-            height: rect.height * 0.8,
+            matches,
+            color: item.color ?? (item.verdict === 'relevant' ? 'green' : 'orange'),
+            issueIndex: null,
+            itemIndex,
           })
-        })
+        }
       })
       issues.forEach((issue, issueIndex) => {
         const excerptMatches = issue.excerpt
-          ? findItemIndexes(textLayer.textContentItemsStr, issue.excerpt)
+          ? findTextMatches(textLayer.textContentItemsStr, issue.excerpt)
           : []
-        const itemIndexes = excerptMatches.length
+        if (excerptMatches.length) matchedIssueExcerpts.add(issueIndex)
+        const matches = excerptMatches.length
           ? excerptMatches
-          : findItemIndexes(textLayer.textContentItemsStr, issue.section)
-        itemIndexes.forEach((itemIndex) => {
-          const textDiv = textLayer.textDivs[itemIndex]
-          if (!textDiv) return
-          const rect = textDiv.getBoundingClientRect()
-          if (!rect.width || !rect.height) return
-          nextMarks.push({
-            issueIndex,
-            itemIndex: null,
-            color: getIssueColor(issue),
-            pageNumber: page.number,
-            left: rect.left - pageRect.left,
-            top: rect.top - pageRect.top + rect.height * 0.1,
-            width: rect.width,
-            height: rect.height * 0.8,
-          })
+          : findTextMatches(textLayer.textContentItemsStr, issue.section)
+        addTextMarks({
+          textLayer,
+          pageRect,
+          pageNumber: page.number,
+          matches,
+          color: getIssueColor(issue),
+          issueIndex,
+          itemIndex: null,
         })
       })
     }
 
     if (generation === renderGeneration) {
       marks = removeOverlappingMarks(mergeAdjacentMarks(nextMarks))
-      const matchedIssues = new Set(nextMarks.filter((mark) => mark.issueIndex !== null).map((mark) => mark.issueIndex))
-      if (issues.some((_, index) => !matchedIssues.has(index))) {
+      items.forEach((item, index) => {
+        if (!item.excerpt || matchedItemExcerpts.has(index)) return
+        const key = `item:${index}:${item.excerpt}`
+        if (loggedUnmatchedExcerpts.has(key)) return
+        loggedUnmatchedExcerpts.add(key)
+        console.warn('[ResumePreview] no PDF text match for item excerpt', { index, excerpt: item.excerpt })
+      })
+      issues.forEach((issue, index) => {
+        if (!issue.excerpt || matchedIssueExcerpts.has(index)) return
+        const key = `issue:${index}:${issue.excerpt}`
+        if (loggedUnmatchedExcerpts.has(key)) return
+        loggedUnmatchedExcerpts.add(key)
+        console.warn('[ResumePreview] no PDF text match for issue excerpt', { index, excerpt: issue.excerpt })
+      })
+      if (issues.some((_, index) => !nextMarks.some((mark) => mark.issueIndex === index))) {
         highlightWarning = 'Some sections could not be matched to selectable text in this PDF. Every finding and solution is still listed alongside the preview.'
       } else {
         highlightWarning = ''
+      }
+      const coverage = totalResumeCharacters
+        ? `${((coveredCharacters.size / totalResumeCharacters) * 100).toFixed(1)}% (${coveredCharacters.size}/${totalResumeCharacters} characters)`
+        : '0% (0/0 characters)'
+      if (coverage !== lastCoverageLog) {
+        console.info(`[ResumePreview] resume text covered by marks: ${coverage}`)
+        lastCoverageLog = coverage
       }
     }
   }

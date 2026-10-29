@@ -75,12 +75,12 @@ const item = (over: Partial<Item>): Item =>
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
-Deno.test("issueColor: errors and missing content are red, weak content is orange", () => {
+Deno.test("issueColor: error and missing must-have are red, the rest orange", () => {
   assert(issueColor("error", "x", null) === "red", "error is red")
   assert(issueColor("missing", null, "MH") === "red", "missing must-have is red")
-  assert(issueColor("missing", null, "SP") === "red", "missing preferred item is red")
-  assert(issueColor("missing", null, null) === "red", "missing without a knowledge base item is red")
   assert(issueColor(null, null, "MH") === "red", "no kind and no excerpt counts as missing")
+  assert(issueColor("missing", null, "SP") === "orange" && issueColor("missing", null, "NH") === "orange", "missing lower tier is orange")
+  assert(issueColor("missing", null, null) === "orange", "missing with no knowledge base item is orange")
   assert(issueColor("weak", "quote", "MH") === "orange" && issueColor(null, "quote", "MH") === "orange", "weak content is orange")
 })
 
@@ -93,8 +93,9 @@ Deno.test("every weak or irrelevant item becomes an orange issue, relevant items
   ]), kb)
   assert(out.issues.length === 2 && out.issues.every((i) => i.color === "orange"), "two orange issues")
   const vapt = out.issues.find((i) => i.excerpt === "VAPT intern")!
-  assert(vapt.kbItem === "SP1" && vapt.priority === "medium" && vapt.basis === "required in 4 of 9 postings, an advantage in 2 more", "first known knowledge base item is used")
-  assert(out.issues.find((i) => i.excerpt === "AI")!.basis === "general practice, not from the job postings", "no item: general practice")
+  assert(vapt.kbItem === "SP1", "first known knowledge base item is used")
+  assert(vapt.basis === null && vapt.priority === "medium", "an item issue carries no posting label")
+  assert(out.issues.find((i) => i.excerpt === "AI")!.kbItem === null, "no item: no knowledge base id")
   assert(out.items.map((i) => i.color).join() === "green,orange,orange", "item colors")
   assert(out.items[0].kbItems.join() === "MH1", "unknown ids dropped from items")
   assert(out.colorCounts.red === 0 && out.colorCounts.orange === 2 && out.colorCounts.green === 1, "counts")
@@ -148,4 +149,22 @@ Deno.test("model issues: error is red, same excerpt as an item is not repeated, 
 Deno.test("no knowledge base ids at all: items still become issues without a source label", () => {
   const out = finalizeFeedback(withItems([item({ verdict: "weak", issue: "i", solution: "s" })]), parseKnowledgeBase("plain text"))
   assert(out.issues[0].basis === null && out.issues[0].color === "orange" && out.mustHaveSummary === null, "unlabelled")
+})
+
+Deno.test("an issue about a must-have the model marked present is dropped", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([], [{ id: "MH2", status: "present", evidence: "triage" }],
+    [
+      { section: "SKILLS", excerpt: null, issue: "no ticketing tool", solution: "add one", kbItem: "MH2", kind: "missing" },
+      { section: "SKILLS", excerpt: null, issue: "no scripting", solution: "add one", kbItem: "SP1", kind: "missing" },
+    ]), kb)
+  assert(out.issues.length === 1 && out.issues[0].kbItem === "SP1", "only the unrelated issue stays")
+})
+
+Deno.test("suggestions: capped at 6, no repeats, none that repeats an issue fix", () => {
+  const kb = parseKnowledgeBase(KB)
+  const parsed = withItems([item({ verdict: "weak", issue: "i", solution: "Add a triage write-up." })])
+  parsed.suggestions = ["Finish Security+.", " finish security+. ", "add a TRIAGE write-up.", "b", "c", "d", "e", "f", "g"]
+  const out = finalizeFeedback(parsed, kb)
+  assert(out.suggestions.join("|") === "Finish Security+.|b|c|d|e|f", "got " + out.suggestions.join("|"))
 })
