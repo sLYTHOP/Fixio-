@@ -3,7 +3,7 @@
   import { fly } from 'svelte/transition'
   import { ArrowLeft, House, Sun, Moon, Check } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
-  import { getPendingResume, getPendingMeta, clearPendingResume } from './pendingResume.js'
+  import { getPendingResume, getPendingMeta, clearPendingResume, hasPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
   import FeedbackSection from './FeedbackSection.svelte'
   import ResumePreview from './ResumePreview.svelte'
@@ -15,7 +15,7 @@
   export let onSignOut = () => {}
   export let onTourReady = () => {}
 
-  let stage = 'loading' // loading -> uploading -> processing -> done -> error
+  let stage = hasPendingResume() ? 'processing' : 'loading' // processing -> done -> error, or loading saved feedback
   let uploadError = ''
   let roleMeta = null
   let resumeFile = null
@@ -127,6 +127,28 @@
   ]
   let phraseIndex = 0
   let phraseTimer
+  let finishPhraseSequence = null
+
+  function startAnalysisMessages() {
+    phraseIndex = 0
+    return new Promise((resolve) => {
+      finishPhraseSequence = resolve
+      phraseTimer = setInterval(() => {
+        if (phraseIndex === phrases.length - 1) {
+          finishAnalysisMessages()
+        } else {
+          phraseIndex += 1
+        }
+      }, 3000)
+    })
+  }
+
+  function finishAnalysisMessages() {
+    clearInterval(phraseTimer)
+    phraseTimer = null
+    finishPhraseSequence?.()
+    finishPhraseSequence = null
+  }
 
   const firstName = (user?.user_metadata?.full_name || user?.email || '').split(' ')[0]
 
@@ -155,6 +177,7 @@
     const file = getPendingResume()
     roleMeta = getPendingMeta()
     if (!file) {
+      stage = 'loading'
       const { data: savedFeedback, error: feedbackError } = await getLatestFeedback(user.id)
       if (feedbackError) {
         stage = 'error'
@@ -192,11 +215,13 @@
     }
 
     resumeFile = file
-    stage = 'uploading'
+    stage = 'processing'
+    const messagesComplete = startAnalysisMessages()
     const { data: uploadData, error: uploadErr } = await uploadResume(user.id, file)
     clearPendingResume()
 
     if (uploadErr || !uploadData?.path) {
+      finishAnalysisMessages()
       stage = 'error'
       uploadError = 'Upload failed. Please try again.'
       console.error(uploadErr)
@@ -204,22 +229,13 @@
     }
 
     trackEvent('resume_uploaded_success')
-    stage = 'processing'
-    phraseTimer = setInterval(() => {
-      if (phraseIndex >= phrases.length - 1) {
-        clearInterval(phraseTimer)
-        return
-      }
-      phraseIndex += 1
-    }, 4000)
 
     const { data, error: fnError } = await supabase.functions.invoke('analyze-resume', {
       body: { role: roleMeta?.role, level: roleMeta?.level, resumePath: uploadData.path },
     })
 
-    clearInterval(phraseTimer)
-
     if (fnError || !data?.ok) {
+      finishAnalysisMessages()
       stage = 'error'
       uploadError = errorMessages[data?.reason] || 'Something went wrong. Please try again.'
       console.error(fnError || data)
@@ -228,6 +244,7 @@
     }
 
     if (!Array.isArray(data.result?.issues)) {
+      finishAnalysisMessages()
       stage = 'error'
       uploadError = 'Resume feedback could not be displayed because the analysis service needs an update. Please try again later.'
       console.error('[ResultsPage] analysis response is missing structured issues', data.result)
@@ -235,6 +252,7 @@
       return
     }
 
+    await messagesComplete
     feedback = data.result
     stage = 'done'
     await tick()
@@ -242,7 +260,7 @@
     trackEvent('feedback_shown', { role: roleMeta?.role })
   })
 
-  onDestroy(() => clearInterval(phraseTimer))
+  onDestroy(finishAnalysisMessages)
 </script>
 
 <svelte:window on:keydown={handlePurchaseDialogKeydown} />
@@ -309,24 +327,20 @@
       {/if}
     </div>
 
-  {#if stage === 'loading' || stage === 'uploading' || stage === 'processing' || stage === 'error'}
+  {#if stage === 'loading' || stage === 'processing' || stage === 'error'}
     <div class="state-wrap">
       <div class="state-card" class:processing-state={stage === 'processing'}>
         {#if stage === 'loading'}
           <p class="state-eyebrow">Your workspace</p>
           <h1>Loading your recent analysis</h1>
 
-        {:else if stage === 'uploading'}
-          <p class="state-eyebrow">Step 1 of 2</p>
-          <h1>Uploading your resume</h1>
-
         {:else if stage === 'processing'}
           <div class="analysis-message-window" aria-live="polite" aria-atomic="true">
             {#key phraseIndex}
               <div
                 class="analysis-message"
-                in:fly={{ y: 30, duration: 850 }}
-                out:fly={{ y: -30, duration: 850 }}
+                in:fly={{ y: 26, duration: 500, delay: 450 }}
+                out:fly={{ y: -26, duration: 450 }}
               >
                 <span class="analysis-step-icon" aria-hidden="true">
                   <Check size={18} strokeWidth={2.5} />

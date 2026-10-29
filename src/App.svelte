@@ -25,8 +25,9 @@
   let uploadPanel
   let uploadError = ''
   let roleModalOpen = false
+  let rolePreparationError = ''
   let signInModalOpen = false
-  let view = hasPendingResume() ? 'authenticating' : 'landing' // 'landing' | 'preparing' | 'authenticating' | 'results'
+  let view = hasPendingResume() ? 'authenticating' : 'landing' // 'landing' | 'authenticating' | 'results'
   let preparingAnalysis = false
   let pendingFile = null // held in memory between upload and role questionnaire
   let waitlistRole = ''
@@ -199,6 +200,7 @@
 
   function handleFileReady(file) {
     pendingFile = file
+    rolePreparationError = ''
     roleModalOpen = true
   }
 
@@ -209,20 +211,19 @@
     }
 
     preparingAnalysis = true
-    roleModalOpen = false
-    view = 'preparing'
+    rolePreparationError = ''
     try {
       await stashPendingResume(pendingFile, meta)
     } catch (error) {
       console.error('[App] failed to prepare resume analysis', error)
       preparingAnalysis = false
-      view = 'landing'
-      uploadError = 'We could not prepare your resume. Please try uploading it again.'
+      rolePreparationError = 'We could not prepare your resume. Please try again.'
       return
     }
 
     pendingFile = null
     preparingAnalysis = false
+    roleModalOpen = false
     if (user) {
       view = 'results'
     } else {
@@ -271,10 +272,6 @@
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
     <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
   </main>
-{:else if view === 'preparing'}
-  <main class="flex min-h-screen items-center justify-center px-6 text-center">
-    <p class="font-display text-xl font-semibold">Getting your analysis ready...</p>
-  </main>
 {:else}
   <main>
     {#if !roleModalOpen}
@@ -318,5 +315,6 @@
   onClose={() => (roleModalOpen = false)}
   onSubmit={handleRoleSubmit}
   onJoinWaitlist={handleJoinWaitlist}
+  preparationError={rolePreparationError}
 />
 <SignInModal open={signInModalOpen} onClose={closeSignInModal} {waitlistRole} />

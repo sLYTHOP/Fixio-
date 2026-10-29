@@ -8,8 +8,10 @@
   export let onSubmit = () => {}
   /** @type {(role: string) => void} */
   export let onJoinWaitlist = () => {}
+  export let preparationError = ''
 
   let submittedUnsupportedRole = false
+  let submitting = false
   let step = 1
 
   const roles = [
@@ -56,6 +58,7 @@
   }
 
   function close() {
+    if (submitting) return
     step = 1
     submittedUnsupportedRole = false
     onClose()
@@ -69,7 +72,8 @@
     step = 1
   }
 
-  function submit() {
+  async function submit() {
+    if (submitting || !canSubmit) return
     const role = selectedRole === 'Other' ? otherRole.trim() : (subRole || selectedRole)
 
     trackEvent('role_questionnaire_submitted', { role, level })
@@ -79,7 +83,12 @@
       return
     }
 
-    onSubmit({ role, level })
+    submitting = true
+    try {
+      await onSubmit({ role, level })
+    } finally {
+      submitting = false
+    }
   }
 
   function startWaitlistSignup() {
@@ -111,8 +120,9 @@
     >
       <button
         on:click={close}
+        disabled={submitting}
         aria-label="Close"
-        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)]"
+        class="absolute top-4 right-4 text-sm font-semibold w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-2)] disabled:opacity-40"
       >
         ✕
       </button>
@@ -223,6 +233,7 @@
             <button
               type="button"
               on:click={goBack}
+              disabled={submitting}
               class="w-full rounded-full border px-6 py-3.5 text-sm font-semibold transition-colors hover:bg-[var(--surface-2)] sm:w-auto sm:flex-1"
               style="border-color: var(--line); color: var(--ink);"
             >
@@ -231,13 +242,18 @@
             <button
               type="button"
               on:click={submit}
-              disabled={!canSubmit}
+              disabled={!canSubmit || submitting}
               class="w-full rounded-full px-6 py-3.5 text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none sm:flex-1"
               style="background: var(--lime); color: var(--paper);"
             >
-              Submit
+              {submitting ? 'Preparing...' : 'Submit'}
             </button>
           </div>
+          {#if preparationError}
+            <p class="mt-3 text-center text-xs" style="color: var(--coral);" role="alert">
+              {preparationError}
+            </p>
+          {/if}
         {/if}
       {/if}
     </div>
