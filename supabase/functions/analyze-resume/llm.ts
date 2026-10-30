@@ -9,7 +9,8 @@ export type CallOpts = {
   timeoutMs?: number
 }
 export type LlmFail = { ok: false; reason: string; status?: number; transient: boolean; detail: string }
-export type LlmResult = { ok: true; text: string } | LlmFail
+export type Usage = { inputTokens: number | null; outputTokens: number | null }
+export type LlmResult = { ok: true; text: string; usage?: Usage } | LlmFail
 type FetchFn = typeof fetch
 
 export type ItemVerdict = "relevant" | "weak" | "irrelevant"
@@ -21,6 +22,7 @@ export type Item = {
   excerpt: string | null
   verdict: ItemVerdict
   kbItems: string[]
+  roleWork: boolean | null // experience and projects only: shows work the role does day to day
   issue: string | null
   solution: string | null
 }
@@ -31,6 +33,7 @@ export type Feedback = {
   suggestions: string[]
   issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null }[]
   items: Item[]
+  skillsMissing: string[] // knowledge base item ids a strong skills section would show but this one lacks
   mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
@@ -64,6 +67,8 @@ async function postJson(
     clearTimeout(timer)
   }
 }
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null)
 
 // Short, safe-to-log description of a provider error body.
 function shortMsg(body: string): string {
@@ -112,7 +117,8 @@ export async function callClaude(o: CallOpts, fetchFn: FetchFn = fetch): Promise
     console.error("Claude returned no text")
     return { ok: false, reason: "llm_empty", transient: true, detail: "empty answer" }
   }
-  return { ok: true, text: block.text }
+  const usage: Usage = { inputTokens: num(data.usage?.input_tokens), outputTokens: num(data.usage?.output_tokens) }
+  return { ok: true, text: block.text, usage }
 }
 
 // ---------- Gemini ----------
@@ -169,7 +175,11 @@ export async function callGemini(o: CallOpts, fetchFn: FetchFn = fetch): Promise
     console.error("Gemini returned no text:", why)
     return { ok: false, reason: "llm_empty", transient: true, detail: `empty answer ${why}` }
   }
-  return { ok: true, text }
+  const u = data?.usageMetadata
+  const answered = num(u?.candidatesTokenCount)
+  const thinking = num(u?.thoughtsTokenCount)
+  const usage: Usage = { inputTokens: num(u?.promptTokenCount), outputTokens: answered === null && thinking === null ? null : (answered ?? 0) + (thinking ?? 0) }
+  return { ok: true, text, usage }
 }
 
 // ---------- Retry + fallback ----------
@@ -186,7 +196,7 @@ export type Deps = {
   validate?: (text: string) => boolean // is the answer usable? if not, treat it as a failed try
 }
 export type RunResult =
-  | { ok: true; text: string; provider: string; model: string; tried: string[] }
+  | { ok: true; text: string; provider: string; model: string; tried: string[]; usage?: Usage }
   | { ok: false; reason: string; detail: string; tried: string[] }
 
 // Tries each option in order. A temporary failure (busy, rate limit, timeout, empty or unusable
@@ -219,7 +229,7 @@ export async function runWithFallback(attempts: Attempt[], plan: Plan, deps: Dep
           lastReason = "parse_error"
         } else {
           tried.push(`${label}: ok`)
-          return { ok: true, text: r.text, provider: a.provider, model: a.model, tried }
+          return { ok: true, text: r.text, provider: a.provider, model: a.model, tried, usage: r.usage }
         }
       } else {
         tried.push(`${label}: ${r.detail}`)
@@ -297,10 +307,12 @@ export function parseFeedback(text: string): Feedback | null {
           excerpt: cleanStr(it.excerpt),
           verdict,
           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
+          roleWork: typeof it.roleWork === "boolean" ? it.roleWork : null,
           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
           solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
         }
       }),
+    skillsMissing: strList(raw.skillsMissing).map((x) => x.toUpperCase()),
     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
       .map((m: any) => ({

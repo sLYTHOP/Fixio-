@@ -18,7 +18,7 @@
 
   function getIssueColor(issue) {
     if (issue.color !== undefined && issue.color !== null) {
-      return issue.color === 'red' ? 'red' : 'orange'
+      return issue.color
     }
     if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
     return 'orange'
@@ -158,15 +158,9 @@
   }
 
   function removeOverlappingMarks(marks) {
-    const colorPriority = { red: 0, orange: 1, green: 2 }
-    const sortedMarks = [...marks].sort((a, b) =>
-      (colorPriority[a.color] ?? 1) - (colorPriority[b.color] ?? 1) ||
-      Number(a.issueIndex === null) - Number(b.issueIndex === null) ||
-      a.width * a.height - b.width * b.height
-    )
     const visibleMarks = []
 
-    for (const mark of sortedMarks) {
+    for (const mark of marks) {
       let fragments = [{ ...mark }]
       for (const existing of visibleMarks) {
         if (existing.pageNumber !== mark.pageNumber) continue

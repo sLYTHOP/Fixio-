@@ -21,7 +21,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
 // Bump when analysis prompt or output semantics change.
-const ANALYSIS_VERSION = "3"
+const ANALYSIS_VERSION = "4"
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
@@ -160,8 +160,10 @@ Instructions:
 - Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
 - Split the resume into items and give EVERY item a verdict under "items", so that all the content of the resume is covered. One item for each: skill or group of skills on one line of a skills section, bullet point under an experience entry or project (one item per bullet), certification or course, line of education detail, and sentence or line of a summary or profile. Do not make items for the candidate's name, contact details, section headings, dates, or employer and institution names.
 - Verdicts: "relevant" = clearly shows something this role asks for in the knowledge base. "weak" = related to the role but thin, basic, vague or only partly showing what the role asks for. "irrelevant" = shows nothing this role asks for.
-- Judge the resume as a whole. Skills that are not SOC-specific but are normal in security teams today (for example AI or prompt engineering, research skills, analytical reasoning, communication) are fine and count as "relevant" when the rest of the resume is on topic. Flag a non-security skill (for example product management) as "weak" only because it takes space from relevant skills, and say so gently. If most of the resume is off-topic, say that plainly instead.
-- Security skills that SOC teams use less (for example offensive testing tools) are "relevant" when the resume also shows related work such as vulnerability assessment.
+- Judge the resume as a whole. Skills that are not specific to this role but are normal in security teams today (for example AI or prompt engineering, research skills, analytical reasoning, communication) are "relevant" when the rest of the resume is on topic. A non-security skill (for example product management) is "weak", and you say so gently. The code later marks non-core skills as weak when core skills are absent from the skills section, so your job is to fill "skillsMissing" and "kbItems" honestly.
+- kbItems for a skill lists only the knowledge base items it directly supports. A tool or skill that the knowledge base does not name and that the role does not use day to day (for example offensive testing tools, or non-security skills) gets [] for kbItems.
+- "skillsMissing": the IDs of up to 5 knowledge base items of the kind a skills section lists (tools, platforms, techniques, concepts) that a strong skills section for this role would show but the candidate's skills section does not. Most important first. [] if the skills section already covers them. Never include [PA#] items.
+- "roleWork" is for experience and project items only: true when the item shows work the role does day to day (as described by the must-have items), not just knowledge or a related field; false otherwise. For all other items use null. Vulnerability scanning alone or building a product does not count as the role's day-to-day work unless the knowledge base says it does.
 - A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
 - Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
 - Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null.
@@ -182,10 +184,12 @@ Instructions:
       "excerpt": "exact contiguous resume text",
       "verdict": "relevant | weak | irrelevant",
       "kbItems": ["MH1", "SP2"],
+      "roleWork": true,
       "issue": "what is weak and why it matters, or null when relevant",
       "solution": "a concrete, role-relevant way to improve it, or null when relevant"
     }
   ],
+  "skillsMissing": ["SP3", "NH13"],
   "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null", "section": "where the fix belongs, or null when present", "solution": "one concrete sentence, or null when present"}],
   "gaps": ["short phrase with a brief why-it-matters", "..."],
   "issues": [
@@ -228,7 +232,7 @@ Instructions:
 
     const parsed = parseFeedback(llm.text)
     if (!parsed) return json({ ok: false, reason: "parse_error" })
-    const final = finalizeFeedback(parsed, kbItems)
+    const final = finalizeFeedback(parsed, kbItems, kb.role_label)
 
     // 4. Persist the result so the user can revisit it later.
     const { error: saveError } = await supabase.from("feedback").insert({
@@ -237,7 +241,7 @@ Instructions:
       level,
       resume_path: resumePath,
       analysis_key: analysisKey,
-      result: { ...final, meta: { provider: llm.provider, model: llm.model, tried: llm.tried } },
+      result: { ...final, meta: { provider: llm.provider, model: llm.model, tried: llm.tried, usage: llm.usage ?? null } },
     })
     if (saveError) {
       if (saveError.code === "23505") {

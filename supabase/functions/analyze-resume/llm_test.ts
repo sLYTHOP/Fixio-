@@ -202,3 +202,34 @@ Deno.test("parseFeedback: a weak item can stand in for issues, but gaps alone ca
   assert(parseFeedback(relevantOnly) === null, "gaps with nothing to show for them is rejected")
   assert(parseFeedback(JSON.stringify({ items: [{ section: "S", excerpt: "x", verdict: "relevant" }] })) !== null, "items alone are an answer")
 })
+
+Deno.test("parseFeedback: roleWork and skillsMissing", () => {
+  const out = parseFeedback(JSON.stringify({
+    strengths: ["a"],
+    skillsMissing: [" nh13 ", "SP3", 4, ""],
+    items: [
+      { section: "PROJECTS", kind: "project", excerpt: "x", verdict: "weak", roleWork: false },
+      { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant", roleWork: "yes" },
+    ],
+  }))!
+  assert(out.skillsMissing.join() === "NH13,SP3", "ids cleaned")
+  assert(out.items[0].roleWork === false && out.items[1].roleWork === null, "roleWork is a boolean or null")
+})
+
+Deno.test("usage is read from both providers", async () => {
+  const claude = await callClaude(
+    { apiKey: "k", model: "m", systemPrompt: "s", userText: "u", pdfBase64: "p" },
+    (() => Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "hi" }], usage: { input_tokens: 10, output_tokens: 20 } })))) as typeof fetch,
+  )
+  assert(claude.ok && claude.usage?.inputTokens === 10 && claude.usage?.outputTokens === 20, "claude usage")
+  const gemini = await callGemini(
+    { apiKey: "k", model: "m", systemPrompt: "s", userText: "u", pdfBase64: "p" },
+    (() => Promise.resolve(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "hi" }] } }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 7, thoughtsTokenCount: 3 } })))) as typeof fetch,
+  )
+  assert(gemini.ok && gemini.usage?.inputTokens === 5 && gemini.usage?.outputTokens === 10, "gemini usage counts thinking tokens")
+  const none = await callClaude(
+    { apiKey: "k", model: "m", systemPrompt: "s", userText: "u", pdfBase64: "p" },
+    (() => Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "hi" }] })))) as typeof fetch,
+  )
+  assert(none.ok && none.usage?.inputTokens === null && none.usage?.outputTokens === null, "missing usage is null, not a crash")
+})

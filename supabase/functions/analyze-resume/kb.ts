@@ -20,13 +20,18 @@ export type MustHaveSummary = {
 // red: fix first (a missing must-have, a date or contact error). orange: weak, fix after the red ones.
 export type IssueColor = "red" | "orange"
 export type ItemColor = IssueColor | "green"
-export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor }
+// minor: optional polish. Set only when the whole resume is strong, and sorted after the other issues of its color.
+export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor; minor: boolean }
 export type FinalItem = Item & { color: ItemColor }
 export type ColorCounts = { red: number; orange: number; green: number }
-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items"> & {
+export type OverallLevel = "strong" | "moderate" | "low"
+export type Overall = { level: OverallLevel; note: string }
+export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing"> & {
   issues: FinalIssue[]
   items: FinalItem[]
   colorCounts: ColorCounts
+  overall: Overall | null
+  skillsMissing: { id: string; label: string }[]
   mustHaveSummary: MustHaveSummary | null
 }
 
@@ -79,6 +84,9 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
 }
 
 const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
+const shortLabel = (label: string) => label.split(":")[0].trim()
+const listOf = (names: string[]) =>
+  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 
 // Red for errors and for a must-have that is missing. Everything else is weak: orange.
 export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
@@ -87,11 +95,55 @@ export function issueColor(kind: IssueKind | null | undefined, excerpt: string |
   return missing && tier === "MH" ? "red" : "orange"
 }
 
-export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback {
+// How strong the whole resume is for the role. Computed from the checked items and the
+// must-haves, never asked of the model. The thresholds are starting values to tune on real results.
+export function overallFor(items: Item[], summary: MustHaveSummary | null): Overall | null {
+  if (!items.length) return null
+  const share = items.filter((i) => i.verdict === "relevant").length / items.length
+  const coverage = summary && summary.total ? summary.shown / summary.total : null
+  const hasRoleWork = items.some((i) => i.roleWork === true)
+  const anyRoleWorkInfo = items.some((i) => i.roleWork !== null)
+  const counts = summary ? `${summary.shown} of ${summary.total} must-haves shown` : null
+  if ((coverage !== null && coverage < 0.5) || share < 0.4) {
+    return { level: "low", note: `Early stage${counts ? `: ${counts}` : ""}. Start with the red items, then the orange ones.` }
+  }
+  if ((coverage === null || coverage >= 0.85) && share >= 0.7 && (hasRoleWork || !anyRoleWorkInfo)) {
+    return { level: "strong", note: `Strong fit${counts ? `: ${counts}` : ""}, and most of your resume is on target. Items marked minor are optional polish.` }
+  }
+  return { level: "moderate", note: `Partly there${counts ? `: ${counts}` : ""}. Fixing the red items first, then the orange ones, will help most.` }
+}
+
+export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "this role"): FinalFeedback {
   const byId = new Map(kb.map((i) => [i.id, i]))
   const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
   const colorRank: Record<IssueColor, number> = { red: 0, orange: 1 }
   const summary = buildMustHaveSummary(kb, parsed.mustHaves)
+
+  // Core skills a strong skills section would show but this one lacks (ids checked against the knowledge base).
+  const missing: KbItem[] = []
+  for (const id of parsed.skillsMissing) {
+    const k = byId.get(id.toUpperCase())
+    if (k && k.tier !== "PA" && !missing.includes(k)) missing.push(k)
+    if (missing.length === 5) break
+  }
+  const missingNames = missing.map((k) => shortLabel(k.label))
+  const isCore = (it: Item) => it.kbItems.some((id) => {
+    const k = byId.get(id)
+    return !!k && (k.tier === "MH" || k.tier === "SP")
+  })
+
+  // While core skills are absent, a skill that supports no must-have or strongly preferred item
+  // is weak: it takes space the missing skills could use. The fix names those skills.
+  const items0: Item[] = parsed.items.map((it) => {
+    if (it.kind !== "skill" || !missingNames.length || isCore(it)) return it
+    const names = listOf(missingNames.slice(0, 3))
+    return {
+      ...it,
+      verdict: it.verdict === "relevant" ? "weak" : it.verdict,
+      issue: it.verdict === "relevant" ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names}.` : it.issue,
+      solution: `Consider making room for ${names} in place of it.`,
+    }
+  })
 
   const make = (
     base: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null },
@@ -106,11 +158,14 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
       basis: item ? item.basis : kb.length ? "general practice, not from the job postings" : null,
       priority: item ? priorityFor(item.tier) : "medium",
       color: color ?? issueColor(base.kind, base.excerpt, item ? item.tier : null),
+      minor: false,
     }
   }
 
+  const overall = overallFor(items0, summary)
+
   // 1. Every weak or irrelevant item becomes an issue.
-  const fromItems: FinalIssue[] = parsed.items
+  const fromItems: FinalIssue[] = items0
     .filter((it) => it.verdict !== "relevant")
     .map((it) => ({
       // A weak or irrelevant item is not a gap, so it carries no "seen in N postings" label.
@@ -124,6 +179,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
       }, "orange"),
       basis: null,
       priority: "medium" as Priority,
+      minor: overall?.level === "strong",
     }))
 
   // 2. The model's own issues cover what no single item can show: missing content, date errors,
@@ -149,7 +205,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
       let upgraded = false
       for (const i of linked) if (i.excerpt === null) { i.color = "red"; upgraded = true }
       if (!upgraded) {
-        const short = m.label.split(":")[0]
+        const short = shortLabel(m.label)
         all.push(make({
           section: reported?.section ?? "Overall",
           excerpt: null,
@@ -160,7 +216,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
         }, "red"))
       }
     } else if (!linked.length) {
-      const short = m.label.split(":")[0]
+      const short = shortLabel(m.label)
       all.push(make({
         section: reported?.section ?? "Overall",
         excerpt: m.evidence,
@@ -172,15 +228,38 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
     }
   }
 
+  // 4. Experience and projects: at least one entry of each should show work the role does day
+  // to day. Skipped when the model gave no answer for any entry of that kind.
+  const stillNeeded = (summary?.items ?? []).filter((m) => m.status !== "present").map((m) => shortLabel(m.label))
+  const examples = (stillNeeded.length ? stillNeeded : kb.filter((k) => k.tier === "MH").map((k) => shortLabel(k.label))).slice(0, 2)
+  for (const [kind, noun] of [["experience", "experience entries"], ["project", "projects"]] as const) {
+    const group = items0.filter((i) => i.kind === kind)
+    if (!group.length || !group.some((i) => i.roleWork !== null) || group.some((i) => i.roleWork === true)) continue
+    all.push({
+      ...make({
+        section: group[0].section,
+        excerpt: null,
+        issue: `None of your ${noun} show work that ${roleLabel} does day to day.`,
+        solution: examples.length
+          ? `Consider adding or rewording one entry so it shows ${listOf(examples).toLowerCase()}.`
+          : "Consider adding or rewording one entry so it shows the day-to-day work of the role.",
+        kbItem: null,
+        kind: "weak",
+      }, "orange"),
+      basis: null,
+    })
+  }
+
   const issues = all
     .map((final, index) => ({ final, index }))
     .sort((a, b) =>
       colorRank[a.final.color] - colorRank[b.final.color] ||
+      Number(a.final.minor) - Number(b.final.minor) ||
       rank[a.final.priority] - rank[b.final.priority] ||
       a.index - b.index)
     .map((x) => x.final)
 
-  const items: FinalItem[] = parsed.items.map((it) => ({
+  const items: FinalItem[] = items0.map((it) => ({
     ...it,
     kbItems: it.kbItems.filter((id) => byId.has(id)),
     color: it.verdict === "relevant" ? "green" : "orange",
@@ -203,6 +282,15 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[]): FinalFeedback 
     if (suggestions.length === 6) break
   }
 
-  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, ...rest } = parsed
-  return { ...rest, suggestions, issues, items, colorCounts, mustHaveSummary: summary }
+  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, ...rest } = parsed
+  return {
+    ...rest,
+    suggestions,
+    issues,
+    items,
+    colorCounts,
+    overall,
+    skillsMissing: missing.map((k) => ({ id: k.id, label: shortLabel(k.label) })),
+    mustHaveSummary: summary,
+  }
 }

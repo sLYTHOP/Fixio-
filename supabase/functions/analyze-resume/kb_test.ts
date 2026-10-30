@@ -47,7 +47,7 @@ Deno.test("no must-haves in the knowledge base -> no summary", () => {
 })
 
 const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
-  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [] })
+  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [] })
 const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
 
 Deno.test("issues get source label and priority, sorted high to low", () => {
@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
 // ---------- verdicts, colors and issues built in code ----------
 
 const item = (over: Partial<Item>): Item =>
-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], issue: null, solution: null, ...over })
+  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], roleWork: null, issue: null, solution: null, ...over })
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
@@ -167,4 +167,78 @@ Deno.test("suggestions: capped at 6, no repeats, none that repeats an issue fix"
   parsed.suggestions = ["Finish Security+.", " finish security+. ", "add a TRIAGE write-up.", "b", "c", "d", "e", "f", "g"]
   const out = finalizeFeedback(parsed, kb)
   assert(out.suggestions.join("|") === "Finish Security+.|b|c|d|e|f", "got " + out.suggestions.join("|"))
+})
+
+// ---------- skills crowding, role work and the overall level ----------
+
+Deno.test("core skills missing: a non-core skill turns weak and the fix names the missing ones", () => {
+  const kb = parseKnowledgeBase(KB)
+  const parsed = withItems([
+    item({ excerpt: "SIEM", kbItems: ["MH1"] }),
+    item({ excerpt: "Prompt Engineering", kbItems: [] }),
+    item({ excerpt: "Burp Suite", kbItems: ["NH3"], verdict: "relevant" }),
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "intern", kbItems: [] }),
+  ])
+  parsed.skillsMissing = ["sp1", "NH3", "PA1", "ZZ9", "SP1"]
+  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
+  assert(out.skillsMissing.map((m) => m.id).join() === "SP1,NH3", "valid ids only, no PA, no repeats: " + out.skillsMissing.map((m) => m.id).join())
+  assert(out.items.map((i) => i.color).join() === "green,orange,orange,green", "colors: " + out.items.map((i) => i.color).join())
+  const pe = out.issues.find((i) => i.excerpt === "Prompt Engineering")!
+  assert(pe.color === "orange" && pe.issue.includes("SOC Analyst") && pe.solution === "Consider making room for Security tools and Hands-on practice in place of it.", "text: " + pe.solution)
+  assert(out.issues.find((i) => i.excerpt === "SIEM") === undefined, "core skill untouched")
+})
+
+Deno.test("no core skills missing: non-core skills are left as the model judged them", () => {
+  const out = finalizeFeedback(withItems([item({ excerpt: "Prompt Engineering", kbItems: [] })]), parseKnowledgeBase(KB))
+  assert(out.items[0].color === "green" && out.issues.length === 0, "unchanged")
+})
+
+Deno.test("no project shows the role's work: one orange issue on the section, naming what is still needed", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([
+    item({ section: "PROJECTS", kind: "project", excerpt: "a", roleWork: false }),
+    item({ section: "PROJECTS", kind: "project", excerpt: "b", roleWork: false }),
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "c", roleWork: true }),
+  ], [
+    { id: "MH1", status: "present", evidence: "x" },
+    { id: "MH2", status: "partial", evidence: "y" },
+    { id: "MH3", status: "missing", evidence: null },
+  ]), kb, "SOC Analyst")
+  const sec = out.issues.filter((i) => i.excerpt === null && i.section === "PROJECTS")
+  assert(sec.length === 1 && sec[0].color === "orange" && sec[0].basis === null, "one section issue")
+  assert(sec[0].issue === "None of your projects show work that SOC Analyst does day to day.", sec[0].issue)
+  assert(sec[0].solution.includes("alert triage") && sec[0].solution.includes("core security concepts"), "names still-needed must-haves: " + sec[0].solution)
+  assert(!out.issues.some((i) => i.section === "EXPERIENCE" && i.excerpt === null && i.issue.startsWith("None of")), "experience has role work")
+})
+
+Deno.test("role-work check is skipped when the model gave no answer", () => {
+  const out = finalizeFeedback(withItems([item({ section: "PROJECTS", kind: "project", excerpt: "a", roleWork: null })]), parseKnowledgeBase(KB))
+  assert(out.issues.length === 0, "nothing raised")
+})
+
+Deno.test("overall level: strong marks item issues minor and sorts them last, low does not", () => {
+  const kb = parseKnowledgeBase(KB)
+  const must: Feedback["mustHaves"] = [
+    { id: "MH1", status: "present", evidence: "a" }, { id: "MH2", status: "present", evidence: "b" }, { id: "MH3", status: "present", evidence: "c" },
+  ]
+  const good = Array.from({ length: 8 }, (_, n) => item({ excerpt: "g" + n, kbItems: ["MH1"] }))
+  const strong = finalizeFeedback(withItems([
+    ...good,
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "intern", roleWork: true }),
+    item({ section: "PROJECTS", kind: "project", excerpt: "off", verdict: "weak", issue: "off topic", solution: "reword", roleWork: false }),
+  ], must, [{ section: "S", excerpt: "x", issue: "model issue", solution: "fix", kbItem: null, kind: "weak" }]), kb)
+  assert(strong.overall!.level === "strong" && strong.overall!.note.startsWith("Strong fit: 3 of 3 must-haves shown"), "strong: " + strong.overall!.note)
+  const off = strong.issues.find((i) => i.excerpt === "off")!
+  assert(off.minor === true, "item issue is minor")
+  assert(strong.issues.length === 3 && strong.issues[2].excerpt === "off" && !strong.issues[0].minor && !strong.issues[1].minor, "minor sorts after the other orange issues")
+
+  const low = finalizeFeedback(withItems([
+    item({ excerpt: "a", verdict: "weak", issue: "i", solution: "s" }),
+    item({ excerpt: "b", verdict: "irrelevant", issue: "i", solution: "s" }),
+  ], [{ id: "MH1", status: "missing", evidence: null }, { id: "MH2", status: "missing", evidence: null }, { id: "MH3", status: "missing", evidence: null }]), kb)
+  assert(low.overall!.level === "low" && low.issues.every((i) => !i.minor), "low: no minor flags")
+  assert(finalizeFeedback(base([], []), kb).overall === null, "no items, no overall")
+  const mid = finalizeFeedback(withItems([item({ excerpt: "a" }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
+    [{ id: "MH1", status: "present", evidence: "a" }, { id: "MH2", status: "partial", evidence: "b" }, { id: "MH3", status: "present", evidence: "c" }]), kb)
+  assert(mid.overall!.level === "moderate", "moderate: " + mid.overall!.level)
 })

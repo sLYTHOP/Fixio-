@@ -36,7 +36,7 @@
 
   function getIssueColor(issue) {
     if (issue.color !== undefined && issue.color !== null) {
-      return issue.color === 'red' ? 'red' : 'orange'
+      return issue.color
     }
     if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
     return 'orange'
@@ -47,6 +47,14 @@
   }
 
   $: showColorCounts = reviewColors.every(({ color }) => Number.isFinite(feedback?.colorCounts?.[color]))
+  $: overallLabel = ({
+    strong: 'Strong fit',
+    moderate: 'Partly there',
+    low: 'Early stage',
+  })[feedback?.overall?.level]
+  $: missingSkillLabels = Array.isArray(feedback?.skillsMissing)
+    ? feedback.skillsMissing.map((skill) => skill?.label).filter((label) => typeof label === 'string' && label.trim())
+    : []
 
   function setResultsTheme(theme) {
     resultsTheme = theme
@@ -528,6 +536,12 @@
           {/if}
         </span>
         <div class="summary-copy">
+          {#if overallLabel && typeof feedback.overall.note === 'string' && feedback.overall.note.trim()}
+            <p class="overall-note">
+              <span class="overall-level">{overallLabel}</span>
+              <span>{feedback.overall.note}</span>
+            </p>
+          {/if}
           {#if showColorCounts}
             <h2>Review breakdown</h2>
             <div class="summary-color-legend" aria-label="Review color counts">
@@ -578,6 +592,9 @@
                     <span class="issue-heading">
                       <span class="issue-number">{i + 1}</span>
                       <span class="issue-section">{issue.section}</span>
+                      {#if feedback.overall?.level === 'strong' && issue.minor === true && getIssueColor(issue) === 'orange'}
+                        <span class="issue-minor-tag">minor</span>
+                      {/if}
                       <span class="issue-color-label">
                         <i class="issue-color-marker {getIssueColor(issue)}" aria-hidden="true"></i>
                         {getIssueColorLabel(issue)}
@@ -607,6 +624,12 @@
                   <span class="strength-tag">{strength}</span>
                 {/each}
               </div>
+            </section>
+          {/if}
+
+          {#if missingSkillLabels.length}
+            <section class="review-card skills-card" aria-label="Skills">
+              <p>Skills worth adding: {missingSkillLabels.join(', ')}</p>
             </section>
           {/if}
         </div>
@@ -1001,6 +1024,24 @@
     flex: 1;
   }
 
+  .overall-note {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin: 0 0 7px;
+    color: var(--ink-soft);
+    font-size: 10px;
+    line-height: 1.45;
+  }
+
+  .overall-level {
+    flex: 0 0 auto;
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+
   .summary-copy h2 {
     margin: 0 0 3px;
     font-size: 12px;
@@ -1165,6 +1206,17 @@
     text-transform: uppercase;
   }
 
+  .issue-minor-tag {
+    padding: 2px 5px;
+    border-radius: 20px;
+    background: rgb(233 138 18 / 12%);
+    color: #b96b00;
+    font-size: 8px;
+    font-weight: 750;
+    line-height: 1.3;
+    text-transform: uppercase;
+  }
+
   .issue-color-label {
     display: inline-flex;
     align-items: center;
@@ -1173,6 +1225,17 @@
     font-size: 9px;
     font-weight: 650;
     white-space: nowrap;
+  }
+
+  .skills-card {
+    padding: 12px 14px;
+  }
+
+  .skills-card p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 10px;
+    line-height: 1.5;
   }
 
   .issue-chevron {
