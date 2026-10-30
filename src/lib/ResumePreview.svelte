@@ -5,6 +5,7 @@
   export let issues = []
   export let items = []
   export let activeIssue = null
+  export let hoveredIssue = null
 
   const markColors = {
     red: 'rgb(255 35 35 / 55%)',
@@ -36,12 +37,12 @@
   let resizeTimer
   let renderGeneration = 0
   let renderTasks = []
-  let hoveredIssue = null
+  let hoveredMarkIssue = null
   let lastNavigatedIssue = null
   let loggedUnmatchedExcerpts = new Set()
   let lastCoverageLog = ''
 
-  $: visibleIssue = hoveredIssue ?? activeIssue
+  $: visibleIssue = hoveredIssue ?? hoveredMarkIssue ?? activeIssue
   $: activeMark = visibleIssue === null
     ? null
     : marks.find((mark) => mark.issueIndex === visibleIssue) ?? null
@@ -469,10 +470,10 @@
                 style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px; background: {getMarkColor(mark.color)};"
                 aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}. Suggested fix: {issues[mark.issueIndex].solution}"
                 aria-pressed={activeIssue === mark.issueIndex}
-                on:mouseenter={() => (hoveredIssue = mark.issueIndex)}
-                on:mouseleave={() => (hoveredIssue = null)}
-                on:focus={() => (hoveredIssue = mark.issueIndex)}
-                on:blur={() => (hoveredIssue = null)}
+                on:mouseenter={() => (hoveredMarkIssue = mark.issueIndex)}
+                on:mouseleave={() => (hoveredMarkIssue = null)}
+                on:focus={() => (hoveredMarkIssue = mark.issueIndex)}
+                on:blur={() => (hoveredMarkIssue = null)}
                 on:click={() => (activeIssue = activeIssue === mark.issueIndex ? null : mark.issueIndex)}
               ></button>
             {:else}

@@ -20,6 +20,7 @@
   let roleMeta = null
   let resumeFile = null
   let activeIssue = null
+  let hoveredIssue = null
   let paymentPageOpen = false
   let purchaseClicked = false
   let interestSaving = false
@@ -52,10 +53,6 @@
     moderate: 'Partly there',
     low: 'Early stage',
   })[feedback?.overall?.level]
-  $: missingSkillLabels = Array.isArray(feedback?.skillsMissing)
-    ? feedback.skillsMissing.map((skill) => skill?.label).filter((label) => typeof label === 'string' && label.trim())
-    : []
-
   function setResultsTheme(theme) {
     resultsTheme = theme
     try {
@@ -510,8 +507,7 @@
                 {/if}
               </div>
             </div>
-          {/if}
-
+        {/if}
       </div>
     {:else}
       <section class="review-intro">
@@ -565,7 +561,13 @@
 
       <section class="review-layout" aria-label="Resume and review notes">
         <div class="resume-column">
-          <ResumePreview file={resumeFile} issues={feedback.issues} items={feedback.items ?? []} bind:activeIssue />
+          <ResumePreview
+            file={resumeFile}
+            issues={feedback.issues}
+            items={feedback.items ?? []}
+            {hoveredIssue}
+            bind:activeIssue
+          />
         </div>
 
         <div class="review-sidebar">
@@ -584,9 +586,13 @@
                 {#each feedback.issues as issue, i}
                   <button
                     type="button"
-                    aria-expanded={activeIssue === i}
+                    aria-expanded={activeIssue === i || hoveredIssue === i}
                     on:click={() => (activeIssue = activeIssue === i ? null : i)}
-                    class:active={activeIssue === i}
+                    on:mouseenter={() => (hoveredIssue = i)}
+                    on:mouseleave={() => (hoveredIssue = null)}
+                    on:focus={() => (hoveredIssue = i)}
+                    on:blur={() => (hoveredIssue = null)}
+                    class:active={activeIssue === i || hoveredIssue === i}
                     class="issue-card-item"
                   >
                     <span class="issue-heading">
@@ -599,10 +605,10 @@
                         <i class="issue-color-marker {getIssueColor(issue)}" aria-hidden="true"></i>
                         {getIssueColorLabel(issue)}
                       </span>
-                      <span class="issue-chevron" aria-hidden="true">{activeIssue === i ? '⌄' : '›'}</span>
+                      <span class="issue-chevron" aria-hidden="true">{activeIssue === i || hoveredIssue === i ? '⌄' : '›'}</span>
                     </span>
                     <span class="issue-title">{issue.issue}</span>
-                    {#if activeIssue === i}
+                    {#if activeIssue === i || hoveredIssue === i}
                       <span class="issue-detail">
                         <span class="solution-label">Suggested improvement</span>
                         <span>{issue.solution}</span>
@@ -627,11 +633,6 @@
             </section>
           {/if}
 
-          {#if missingSkillLabels.length}
-            <section class="review-card skills-card" aria-label="Skills">
-              <p>Skills worth adding: {missingSkillLabels.join(', ')}</p>
-            </section>
-          {/if}
         </div>
       </section>
 
@@ -1225,17 +1226,6 @@
     font-size: 9px;
     font-weight: 650;
     white-space: nowrap;
-  }
-
-  .skills-card {
-    padding: 12px 14px;
-  }
-
-  .skills-card p {
-    margin: 0;
-    color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.5;
   }
 
   .issue-chevron {
