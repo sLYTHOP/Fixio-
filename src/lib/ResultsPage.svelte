@@ -1031,14 +1031,14 @@
     gap: 7px;
     margin: 0 0 7px;
     color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.45;
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .overall-level {
     flex: 0 0 auto;
     color: var(--accent);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 750;
     white-space: nowrap;
   }
@@ -1060,13 +1060,13 @@
     align-items: center;
     gap: 4px;
     color: var(--ink-soft);
-    font-size: 9px;
+    font-size: 10px;
     line-height: 1.4;
   }
 
   .summary-color-count strong {
     color: var(--ink);
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .color-dot,
