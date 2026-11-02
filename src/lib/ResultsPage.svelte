@@ -36,15 +36,27 @@
   ]
 
   function getIssueColor(issue) {
-    if (issue.color !== undefined && issue.color !== null) {
-      return issue.color
-    }
-    if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
-    return 'orange'
+    return issue.color ?? 'orange'
   }
 
   function getIssueColorLabel(issue) {
     return reviewColors.find(({ color }) => color === getIssueColor(issue))?.label ?? 'Weak'
+  }
+
+  async function handleMarkSelect(event) {
+    const issueIndex = event.detail
+    activeIssue = issueIndex
+    hoveredIssue = null
+    await tick()
+    document.getElementById(`issue-card-${issueIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+
+  async function handleIssueCardSelect(issueIndex) {
+    activeIssue = issueIndex
+    await tick()
+    document.querySelector(`[data-issue-index="${issueIndex}"]`)
+      ?.closest('.resume-page')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
   $: showColorCounts = reviewColors.every(({ color }) => Number.isFinite(feedback?.colorCounts?.[color]))
@@ -567,6 +579,7 @@
             items={feedback.items ?? []}
             {hoveredIssue}
             bind:activeIssue
+            on:markselect={handleMarkSelect}
           />
         </div>
 
@@ -586,8 +599,9 @@
                 {#each feedback.issues as issue, i}
                   <button
                     type="button"
+                    id="issue-card-{i}"
                     aria-expanded={activeIssue === i || hoveredIssue === i}
-                    on:click={() => (activeIssue = activeIssue === i ? null : i)}
+                    on:click={() => handleIssueCardSelect(i)}
                     on:mouseenter={() => (hoveredIssue = i)}
                     on:mouseleave={() => (hoveredIssue = null)}
                     on:focus={() => (hoveredIssue = i)}

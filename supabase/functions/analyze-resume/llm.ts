@@ -23,6 +23,7 @@ export type Item = {
   verdict: ItemVerdict
   kbItems: string[]
   roleWork: boolean | null // experience and projects only: shows work the role does day to day
+  certLevel: "role" | "foundational" | "unrelated" | null // certifications only
   issue: string | null
   solution: string | null
 }
@@ -34,6 +35,7 @@ export type Feedback = {
   issues: { section: string; excerpt: string | null; issue: string; solution: string; kbItem: string | null; kind?: IssueKind | null }[]
   items: Item[]
   skillsMissing: string[] // knowledge base item ids a strong skills section would show but this one lacks
+  nextCerts: string[] // up to 3 certifications from the knowledge base that are the next step
   mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
@@ -249,6 +251,7 @@ const strList = (v: unknown): string[] =>
 
 const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
 const ISSUE_KINDS = new Set(["missing", "weak", "error"])
+const CERT_LEVELS = new Set(["role", "foundational", "unrelated"])
 const ITEM_KINDS = new Set(["skill", "experience", "project", "certification", "education", "other"])
 const cleanStr = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
 
@@ -308,11 +311,13 @@ export function parseFeedback(text: string): Feedback | null {
           verdict,
           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
           roleWork: typeof it.roleWork === "boolean" ? it.roleWork : null,
+          certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
           solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
         }
       }),
     skillsMissing: strList(raw.skillsMissing).map((x) => x.toUpperCase()),
+    nextCerts: strList(raw.nextCerts).slice(0, 3),
     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
       .map((m: any) => ({

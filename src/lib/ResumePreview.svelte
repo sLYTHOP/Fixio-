@@ -1,5 +1,5 @@
 <script>
-  import { afterUpdate, onDestroy, onMount, tick } from 'svelte'
+  import { afterUpdate, createEventDispatcher, onDestroy, onMount, tick } from 'svelte'
 
   export let file
   export let issues = []
@@ -15,14 +15,6 @@
 
   function getMarkColor(color) {
     return markColors[color] ?? markColors.orange
-  }
-
-  function getIssueColor(issue) {
-    if (issue.color !== undefined && issue.color !== null) {
-      return issue.color
-    }
-    if (issue.kind === 'error' || issue.kind === 'missing' || (!issue.kind && issue.excerpt === null)) return 'red'
-    return 'orange'
   }
 
   let containerEl
@@ -41,6 +33,7 @@
   let lastNavigatedIssue = null
   let loggedUnmatchedExcerpts = new Set()
   let lastCoverageLog = ''
+  const dispatch = createEventDispatcher()
 
   $: visibleIssue = hoveredIssue ?? hoveredMarkIssue ?? activeIssue
   $: activeMark = visibleIssue === null
@@ -55,7 +48,7 @@
       .trim()
   }
 
-  function findTextMatches(items, query) {
+  function findTextMatches(items, query, section = null, sectionHeadings = []) {
     const normalizedQuery = normalizeText(query)
     if (!normalizedQuery) return []
 
@@ -63,7 +56,7 @@
     const positions = []
     items.forEach((item, itemIndex) => {
       let rawOffset = 0
-      for (const rawCharacter of item) {
+      for (const rawCharacter of item.text) {
         const start = rawOffset
         rawOffset += rawCharacter.length
         for (const character of rawCharacter.normalize('NFKC').toLowerCase()) {
@@ -82,7 +75,29 @@
       }
     })
 
-    const start = normalizedText.indexOf(normalizedQuery)
+    let searchStart = 0
+    let searchEnd = normalizedText.length
+    const normalizedSection = normalizeText(section ?? '')
+    if (normalizedSection) {
+      const sectionStart = normalizedText.indexOf(normalizedSection)
+      if (sectionStart >= 0) {
+        searchStart = sectionStart
+        const sectionContentStart = sectionStart + normalizedSection.length
+        for (const heading of sectionHeadings) {
+          const normalizedHeading = normalizeText(heading)
+          if (!normalizedHeading || normalizedHeading === normalizedSection) continue
+          const headingStart = normalizedText.indexOf(normalizedHeading, sectionContentStart)
+          if (headingStart >= 0) searchEnd = Math.min(searchEnd, headingStart)
+        }
+      }
+    }
+
+    let start = normalizedText.indexOf(normalizedQuery, searchStart)
+    if (start < 0 || start + normalizedQuery.length > searchEnd) {
+      searchStart = 0
+      searchEnd = normalizedText.length
+      start = normalizedText.indexOf(normalizedQuery)
+    }
     if (start < 0) return []
     const end = start + normalizedQuery.length
     const rangesByItem = new Map()
@@ -226,31 +241,33 @@
       }
     }
 
-    function addTextMarks({ textLayer, pageRect, pageNumber, matches, color, issueIndex, itemIndex }) {
+    function addTextMarks({ documentTextItems, matches, color, issueIndex, itemIndex }) {
       matches.forEach((match) => {
-        const textDiv = textLayer.textDivs[match.itemIndex]
+        const textItem = documentTextItems[match.itemIndex]
+        const textDiv = textItem?.textLayer.textDivs[textItem.textItemIndex]
         if (!textDiv) return
         const rects = getTextRects(textDiv, match.start, match.end)
         rects.forEach((rect) => {
           if (!rect.width || !rect.height) return
           nextMarks.push({
             itemIndex,
-            textItemIndex: match.itemIndex,
+            textItemIndex: textItem.textItemIndex,
             issueIndex,
             color,
-            pageNumber,
-            left: rect.left - pageRect.left,
-            top: rect.top - pageRect.top + rect.height * 0.1,
+            pageNumber: textItem.pageNumber,
+            left: rect.left - textItem.pageRect.left,
+            top: rect.top - textItem.pageRect.top + rect.height * 0.1,
             width: rect.width,
             height: rect.height * 0.8,
           })
         })
         if (rects.some((rect) => rect.width && rect.height)) {
-          recordCoverage(pageNumber, match.itemIndex, match.start, match.end)
+          recordCoverage(textItem.pageNumber, textItem.textItemIndex, match.start, match.end)
         }
       })
     }
 
+    const renderedPages = []
     for (const page of pages) {
       if (generation !== renderGeneration) return
       const wrapper = containerEl.querySelector(`[data-pdf-page="${page.number}"]`)
@@ -288,42 +305,49 @@
       await textLayer.render()
 
       const pageRect = wrapper.getBoundingClientRect()
+      renderedPages.push({ page, textLayer, pageRect })
       totalResumeCharacters += textLayer.textContentItemsStr.reduce((total, text) => total + text.length, 0)
-      items.forEach((item, itemIndex) => {
-        if (!item.excerpt) return
-        const matches = findTextMatches(textLayer.textContentItemsStr, item.excerpt)
-        if (matches.length) {
-          matchedItemExcerpts.add(itemIndex)
-          addTextMarks({
-            textLayer,
-            pageRect,
-            pageNumber: page.number,
-            matches,
-            color: item.color ?? (item.verdict === 'relevant' ? 'green' : 'orange'),
-            issueIndex: null,
-            itemIndex,
-          })
-        }
-      })
-      issues.forEach((issue, issueIndex) => {
-        const excerptMatches = issue.excerpt
-          ? findTextMatches(textLayer.textContentItemsStr, issue.excerpt)
-          : []
-        if (excerptMatches.length) matchedIssueExcerpts.add(issueIndex)
-        const matches = excerptMatches.length
-          ? excerptMatches
-          : findTextMatches(textLayer.textContentItemsStr, issue.section)
-        addTextMarks({
-          textLayer,
-          pageRect,
-          pageNumber: page.number,
-          matches,
-          color: getIssueColor(issue),
-          issueIndex,
-          itemIndex: null,
-        })
-      })
     }
+
+    const documentTextItems = renderedPages.flatMap(({ page, textLayer, pageRect }) =>
+      textLayer.textContentItemsStr.map((text, textItemIndex) => ({
+        text,
+        pageNumber: page.number,
+        textLayer,
+        pageRect,
+        textItemIndex,
+      })),
+    )
+    const sectionHeadings = [...new Set([...items, ...issues].map((entry) => entry.section).filter(Boolean))]
+
+    issues.forEach((issue, issueIndex) => {
+      const matches = findTextMatches(
+        documentTextItems,
+        issue.excerpt || issue.section,
+        issue.excerpt ? issue.section : null,
+        sectionHeadings,
+      )
+      if (issue.excerpt && matches.length) matchedIssueExcerpts.add(issueIndex)
+      addTextMarks({
+        documentTextItems,
+        matches,
+        color: issue.color,
+        issueIndex,
+        itemIndex: null,
+      })
+    })
+    items.forEach((item, itemIndex) => {
+      if (!item.excerpt) return
+      const matches = findTextMatches(documentTextItems, item.excerpt, item.section, sectionHeadings)
+      if (matches.length) matchedItemExcerpts.add(itemIndex)
+      addTextMarks({
+        documentTextItems,
+        matches,
+        color: item.color,
+        issueIndex: item.issueIndex ?? null,
+        itemIndex,
+      })
+    })
 
     if (generation === renderGeneration) {
       marks = removeOverlappingMarks(mergeAdjacentMarks(nextMarks))
@@ -397,11 +421,14 @@
   })
 
   afterUpdate(() => {
+    if (activeIssue === null) {
+      lastNavigatedIssue = null
+      return
+    }
     if (activeIssue === lastNavigatedIssue) return
-    lastNavigatedIssue = activeIssue
-    if (activeIssue === null) return
     const mark = marks.find((item) => item.issueIndex === activeIssue)
     if (mark) {
+      lastNavigatedIssue = activeIssue
       containerEl
         ?.querySelector(`[data-pdf-page="${mark.pageNumber}"]`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -422,9 +449,9 @@
     <div>
       <p class="resume-preview-title font-display font-semibold">Your resume</p>
       <div class="resume-mark-legend" aria-label="Resume review colors">
-        <span><i class="legend-dot red"></i>Missing / incorrect</span>
-        <span><i class="legend-dot orange"></i>Needs strengthening</span>
-        <span><i class="legend-dot green"></i>Role-relevant</span>
+        <span><i class="legend-dot red"></i>Fix first</span>
+        <span><i class="legend-dot orange"></i>Weak</span>
+        <span><i class="legend-dot green"></i>Looks right</span>
       </div>
     </div>
     <a
@@ -465,6 +492,7 @@
             {#if mark.issueIndex !== null}
               <button
                 type="button"
+                data-issue-index={mark.issueIndex}
                 class:active={visibleIssue === mark.issueIndex}
                 class="resume-mark"
                 style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px; background: {getMarkColor(mark.color)};"
@@ -474,7 +502,11 @@
                 on:mouseleave={() => (hoveredMarkIssue = null)}
                 on:focus={() => (hoveredMarkIssue = mark.issueIndex)}
                 on:blur={() => (hoveredMarkIssue = null)}
-                on:click={() => (activeIssue = activeIssue === mark.issueIndex ? null : mark.issueIndex)}
+                on:click={() => {
+                  lastNavigatedIssue = mark.issueIndex
+                  activeIssue = mark.issueIndex
+                  dispatch('markselect', mark.issueIndex)
+                }}
               ></button>
             {:else}
               <span

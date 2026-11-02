@@ -22,7 +22,9 @@ export type IssueColor = "red" | "orange"
 export type ItemColor = IssueColor | "green"
 // minor: optional polish. Set only when the whole resume is strong, and sorted after the other issues of its color.
 export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor; minor: boolean }
-export type FinalItem = Item & { color: ItemColor }
+// issueIndex: position of this item's issue in the sorted issues list, so a mark on the resume can open that
+// issue. null for relevant items. red is used for skills and certifications that have nothing to do with the field.
+export type FinalItem = Item & { color: ItemColor; issueIndex: number | null }
 export type ColorCounts = { red: number; orange: number; green: number }
 export type OverallLevel = "strong" | "moderate" | "low"
 export type Overall = { level: OverallLevel; note: string }
@@ -87,6 +89,11 @@ const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").
 const shortLabel = (label: string) => label.split(":")[0].trim()
 const listOf = (names: string[]) =>
   names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+
+// Skills and certifications that have nothing to do with the field take space for nothing: red.
+// An unrelated job or project is normal for a fresher, so those stay orange.
+const itemColor = (it: Item): ItemColor =>
+  it.verdict === "relevant" ? "green" : it.verdict === "irrelevant" && (it.kind === "skill" || it.kind === "certification") ? "red" : "orange"
 
 // Red for errors and for a must-have that is missing. Everything else is weak: orange.
 export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
@@ -165,9 +172,12 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
   const overall = overallFor(items0, summary)
 
   // 1. Every weak or irrelevant item becomes an issue.
+  const issueOf = new Map<Item, FinalIssue>()
   const fromItems: FinalIssue[] = items0
     .filter((it) => it.verdict !== "relevant")
-    .map((it) => ({
+    .map((it) => {
+      const color = itemColor(it) as IssueColor
+      const issue: FinalIssue = {
       // A weak or irrelevant item is not a gap, so it carries no "seen in N postings" label.
       ...make({
         section: it.section,
@@ -176,11 +186,14 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
         solution: it.solution ?? "",
         kbItem: it.kbItems.find((id) => byId.has(id)) ?? null,
         kind: "weak",
-      }, "orange"),
+      }, color),
       basis: null,
       priority: "medium" as Priority,
-      minor: overall?.level === "strong",
-    }))
+      minor: overall?.level === "strong" && color === "orange",
+      }
+      issueOf.set(it, issue)
+      return issue
+    })
 
   // 2. The model's own issues cover what no single item can show: missing content, date errors,
   // formatting. An issue about text already covered by an item is dropped as a duplicate.
@@ -250,6 +263,38 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     })
   }
 
+  // 5. Certifications: at least one should be aimed at the role (or above the foundational level).
+  // All foundational: orange, with the next steps from the knowledge base. None related to the
+  // field at all: red. Skipped when the model gave no level for any certification.
+  const certs = items0.filter((i) => i.kind === "certification")
+  if (certs.length && certs.some((i) => i.certLevel !== null) && !certs.some((i) => i.certLevel === "role")) {
+    const next = [...new Set(parsed.nextCerts.map((c) => c.trim()).filter(Boolean))].slice(0, 3)
+    const foundational = certs.some((i) => i.certLevel === "foundational")
+    all.push(foundational
+      ? make({
+        section: certs[0].section,
+        excerpt: null,
+        issue: "All of your certifications are at the foundational level.",
+        solution: next.length
+          ? `Consider adding ${listOf(next)} next, as a step beyond the foundational level.`
+          : `Consider adding one certification aimed at the work of ${roleLabel}, as a step beyond the foundational level.`,
+        kbItem: null,
+        kind: "weak",
+      }, "orange")
+      : make({
+        section: certs[0].section,
+        excerpt: null,
+        issue: `None of your certifications relate to the work of ${roleLabel}.`,
+        solution: next.length
+          ? `Consider starting with ${listOf(next)}.`
+          : "Consider starting with an entry-level security certification.",
+        kbItem: null,
+        kind: "missing",
+      }, "red"))
+    const last = all[all.length - 1]
+    last.basis = null
+  }
+
   const issues = all
     .map((final, index) => ({ final, index }))
     .sort((a, b) =>
@@ -259,11 +304,16 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
       a.index - b.index)
     .map((x) => x.final)
 
-  const items: FinalItem[] = items0.map((it) => ({
-    ...it,
-    kbItems: it.kbItems.filter((id) => byId.has(id)),
-    color: it.verdict === "relevant" ? "green" : "orange",
-  }))
+  const position = new Map(issues.map((issue, index) => [issue, index]))
+  const items: FinalItem[] = items0.map((it) => {
+    const issue = issueOf.get(it)
+    return {
+      ...it,
+      kbItems: it.kbItems.filter((id) => byId.has(id)),
+      color: itemColor(it),
+      issueIndex: issue ? (position.get(issue) ?? null) : null,
+    }
+  })
 
   const colorCounts: ColorCounts = {
     red: issues.filter((i) => i.color === "red").length,

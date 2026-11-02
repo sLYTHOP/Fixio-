@@ -47,7 +47,7 @@ Deno.test("no must-haves in the knowledge base -> no summary", () => {
 })
 
 const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
-  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [] })
+  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [], nextCerts: [] })
 const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
 
 Deno.test("issues get source label and priority, sorted high to low", () => {
@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
 // ---------- verdicts, colors and issues built in code ----------
 
 const item = (over: Partial<Item>): Item =>
-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], roleWork: null, issue: null, solution: null, ...over })
+  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], roleWork: null, certLevel: null, issue: null, solution: null, ...over })
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
@@ -84,21 +84,21 @@ Deno.test("issueColor: error and missing must-have are red, the rest orange", ()
   assert(issueColor("weak", "quote", "MH") === "orange" && issueColor(null, "quote", "MH") === "orange", "weak content is orange")
 })
 
-Deno.test("every weak or irrelevant item becomes an orange issue, relevant items turn green", () => {
+Deno.test("every weak or irrelevant item becomes an issue, relevant items turn green", () => {
   const kb = parseKnowledgeBase(KB)
   const out = finalizeFeedback(withItems([
     item({ excerpt: "Splunk alerts", verdict: "relevant", kbItems: ["MH1", "ZZ9"] }),
     item({ excerpt: "AI", verdict: "irrelevant", issue: "buzzword", solution: "name a tool" }),
     item({ section: "EXPERIENCE", kind: "experience", excerpt: "VAPT intern", verdict: "weak", kbItems: ["ZZ9", "SP1"], issue: "not SOC", solution: "add log work" }),
   ]), kb)
-  assert(out.issues.length === 2 && out.issues.every((i) => i.color === "orange"), "two orange issues")
+  assert(out.issues.length === 2 && out.issues[0].excerpt === "AI" && out.issues[0].color === "red" && out.issues[1].color === "orange", "an unrelated skill is red, a weak experience orange")
   const vapt = out.issues.find((i) => i.excerpt === "VAPT intern")!
   assert(vapt.kbItem === "SP1", "first known knowledge base item is used")
   assert(vapt.basis === null && vapt.priority === "medium", "an item issue carries no posting label")
   assert(out.issues.find((i) => i.excerpt === "AI")!.kbItem === null, "no item: no knowledge base id")
-  assert(out.items.map((i) => i.color).join() === "green,orange,orange", "item colors")
+  assert(out.items.map((i) => i.color).join() === "green,red,orange", "item colors")
   assert(out.items[0].kbItems.join() === "MH1", "unknown ids dropped from items")
-  assert(out.colorCounts.red === 0 && out.colorCounts.orange === 2 && out.colorCounts.green === 1, "counts")
+  assert(out.colorCounts.red === 1 && out.colorCounts.orange === 1 && out.colorCounts.green === 1, "counts")
 })
 
 Deno.test("a missing must-have gets a red issue even if the model raised none", () => {
@@ -241,4 +241,53 @@ Deno.test("overall level: strong marks item issues minor and sorts them last, lo
   const mid = finalizeFeedback(withItems([item({ excerpt: "a" }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
     [{ id: "MH1", status: "present", evidence: "a" }, { id: "MH2", status: "partial", evidence: "b" }, { id: "MH3", status: "present", evidence: "c" }]), kb)
   assert(mid.overall!.level === "moderate", "moderate: " + mid.overall!.level)
+})
+
+// ---------- red for unrelated skills and certifications, certification levels, item links ----------
+
+Deno.test("unrelated skills and certifications are red, an unrelated job or project stays orange", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([
+    item({ excerpt: "PowerPoint", verdict: "irrelevant", issue: "off", solution: "swap" }),
+    item({ section: "CERTIFICATIONS", kind: "certification", excerpt: "CSS Mastery", verdict: "irrelevant", issue: "off", solution: "swap" }),
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "Cafe job", verdict: "irrelevant", issue: "off", solution: "ok" }),
+    item({ excerpt: "Burp Suite", verdict: "weak", issue: "adjacent", solution: "ok" }),
+  ]), kb)
+  const color = (e: string) => out.issues.find((i) => i.excerpt === e)!.color
+  assert(color("PowerPoint") === "red" && color("CSS Mastery") === "red", "red for skill and certification")
+  assert(color("Cafe job") === "orange" && color("Burp Suite") === "orange", "orange otherwise")
+  assert(out.items.map((i) => i.color).join() === "red,red,orange,orange", out.items.map((i) => i.color).join())
+})
+
+Deno.test("items point at their issue in the sorted list", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([
+    item({ excerpt: "fine", verdict: "relevant", kbItems: ["MH1"] }),
+    item({ excerpt: "Burp Suite", verdict: "weak", issue: "adjacent", solution: "ok" }),
+    item({ excerpt: "PowerPoint", verdict: "irrelevant", issue: "off", solution: "swap" }),
+  ]), kb)
+  assert(out.items[0].issueIndex === null, "relevant item has no issue")
+  assert(out.issues[out.items[2].issueIndex!].excerpt === "PowerPoint" && out.issues[out.items[1].issueIndex!].excerpt === "Burp Suite", "links follow the sorted order")
+  assert(out.items[2].issueIndex === 0, "the red one sorts first")
+})
+
+Deno.test("certification section: all foundational is orange with next steps, none related is red", () => {
+  const kb = parseKnowledgeBase(KB)
+  const cert = (excerpt: string, certLevel: Item["certLevel"], verdict: Item["verdict"] = "relevant") =>
+    item({ section: "CERTIFICATIONS", kind: "certification", excerpt, certLevel, verdict, issue: verdict === "relevant" ? null : "i", solution: verdict === "relevant" ? null : "s" })
+  const foundational = withItems([cert("Google Cert", "foundational"), cert("Python Essentials", "foundational", "weak")])
+  foundational.nextCerts = ["CySA+", "SC-200"]
+  const a = finalizeFeedback(foundational, kb, "SOC Analyst")
+  const sec = a.issues.find((i) => i.excerpt === null && i.section === "CERTIFICATIONS")!
+  assert(sec.color === "orange" && sec.issue === "All of your certifications are at the foundational level.", "orange")
+  assert(sec.solution === "Consider adding CySA+ and SC-200 next, as a step beyond the foundational level.", sec.solution)
+
+  const none = finalizeFeedback(withItems([cert("CSS Mastery", "unrelated", "irrelevant")]), kb, "SOC Analyst")
+  const red = none.issues.find((i) => i.excerpt === null)!
+  assert(red.color === "red" && red.issue === "None of your certifications relate to the work of SOC Analyst.", "red")
+
+  const fine = finalizeFeedback(withItems([cert("Google Cert", "foundational"), cert("SC-200", "role")]), kb)
+  assert(fine.issues.length === 0, "a role-level certification is enough")
+  const unknown = finalizeFeedback(withItems([cert("Google Cert", null)]), kb)
+  assert(unknown.issues.length === 0, "skipped when the model gave no levels")
 })

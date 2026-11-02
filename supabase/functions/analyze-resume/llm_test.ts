@@ -233,3 +233,15 @@ Deno.test("usage is read from both providers", async () => {
   )
   assert(none.ok && none.usage?.inputTokens === null && none.usage?.outputTokens === null, "missing usage is null, not a crash")
 })
+
+Deno.test("parseFeedback: certLevel and nextCerts", () => {
+  const out = parseFeedback(JSON.stringify({
+    strengths: ["a"], nextCerts: [" CySA+ ", "SC-200", "Security+", "GCIH", ""],
+    items: [
+      { section: "CERTS", kind: "certification", excerpt: "x", verdict: "relevant", certLevel: " Foundational " },
+      { section: "CERTS", kind: "certification", excerpt: "y", verdict: "relevant", certLevel: "expert" },
+    ],
+  }))!
+  assert(out.nextCerts.join() === "CySA+,SC-200,Security+", "cleaned and capped at 3")
+  assert(out.items[0].certLevel === "foundational" && out.items[1].certLevel === null, "levels")
+})
