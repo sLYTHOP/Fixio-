@@ -39,6 +39,9 @@
   $: activeMark = visibleIssue === null
     ? null
     : marks.find((mark) => mark.issueIndex === visibleIssue) ?? null
+  $: hoveredMark = hoveredMarkIssue === null
+    ? null
+    : marks.find((mark) => mark.issueIndex === hoveredMarkIssue) ?? null
 
   function normalizeText(text) {
     return text
@@ -517,14 +520,14 @@
             {/if}
           {/each}
 
-          {#if activeMark?.pageNumber === page.number}
+          {#if hoveredMark?.pageNumber === page.number}
             <div
               class="solution-popover"
-              style="left: {Math.max(8, Math.min(activeMark.left, page.width - 296))}px; top: {Math.max(8, activeMark.top - 82)}px;"
+              style="left: {Math.max(8, Math.min(hoveredMark.left, page.width - 296))}px; top: {Math.max(8, hoveredMark.top - 82)}px;"
               role="status"
             >
               <p class="text-xs font-bold uppercase tracking-wide">Suggested fix</p>
-              <p class="mt-1 text-sm">{issues[activeMark.issueIndex].solution}</p>
+              <p class="mt-1 text-sm">{issues[hoveredMark.issueIndex].solution}</p>
             </div>
           {/if}
         </div>
