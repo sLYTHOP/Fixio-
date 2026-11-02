@@ -29,6 +29,7 @@
   let signInModalOpen = false
   let view = hasPendingResume() ? 'authenticating' : 'landing' // 'landing' | 'authenticating' | 'results'
   let preparingAnalysis = false
+  let resumeTransitionTimer = null
   let pendingFile = null // held in memory between upload and role questionnaire
   let waitlistRole = ''
   let waitlistNotice = ''
@@ -139,7 +140,13 @@
     if (hasPendingResume()) {
       clearPendingWaitlistRole()
       waitlistRole = ''
-      view = 'results'
+      view = 'authenticating'
+      if (resumeTransitionTimer === null) {
+        resumeTransitionTimer = setTimeout(() => {
+          resumeTransitionTimer = null
+          if (user?.id === authenticatedUser.id) view = 'results'
+        }, 3000)
+      }
       return
     }
     if (getPendingWaitlistRole()) {
@@ -175,6 +182,8 @@
       if (session?.user) {
         handleAuthenticated(session.user)
       } else {
+        clearTimeout(resumeTransitionTimer)
+        resumeTransitionTimer = null
         user = null
         if (preparingAnalysis) return
         if (hasPendingResume()) {
@@ -189,7 +198,10 @@
       }
     })
 
-    return () => listener.subscription.unsubscribe()
+    return () => {
+      listener.subscription.unsubscribe()
+      clearTimeout(resumeTransitionTimer)
+    }
   })
 
   // "Get started" / hero CTA -> ask for the resume first
@@ -266,7 +278,7 @@
   }
 </script>
 
-{#if (view === 'results' || hasPendingResume()) && user}
+{#if (view === 'results' || (hasPendingResume() && view !== 'authenticating')) && user}
   <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onSignOut={signOut} onTourReady={startFirstTour} />
 {:else if view === 'authenticating' || hasPendingResume()}
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
