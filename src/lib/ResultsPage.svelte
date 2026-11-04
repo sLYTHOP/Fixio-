@@ -21,6 +21,8 @@
   let resumeFile = null
   let activeIssue = null
   let hoveredIssue = null
+  let currentIssueIndex = 0
+  let showAllIssues = false
   let paymentPageOpen = false
   let purchaseClicked = false
   let interestSaving = false
@@ -45,18 +47,32 @@
 
   async function handleMarkSelect(event) {
     const issueIndex = event.detail
+    currentIssueIndex = issueIndex
     activeIssue = issueIndex
     hoveredIssue = null
+    showAllIssues = false
     await tick()
-    document.getElementById(`issue-card-${issueIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    document.getElementById('selected-issue-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
   async function handleIssueCardSelect(issueIndex) {
+    currentIssueIndex = issueIndex
     activeIssue = issueIndex
+    hoveredIssue = null
+    showAllIssues = false
     await tick()
     document.querySelector(`[data-issue-index="${issueIndex}"]`)
       ?.closest('.resume-page')
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  async function navigateIssue(offset) {
+    if (!feedback?.issues?.length) return
+    currentIssueIndex = Math.max(0, Math.min(feedback.issues.length - 1, currentIssueIndex + offset))
+    activeIssue = currentIssueIndex
+    hoveredIssue = null
+    await tick()
+    document.getElementById('selected-issue-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
   $: showColorCounts = reviewColors.every(({ color }) => Number.isFinite(feedback?.colorCounts?.[color]))
@@ -231,6 +247,9 @@
         return
       }
       feedback = savedFeedback.result
+      currentIssueIndex = 0
+      activeIssue = feedback.issues?.length ? 0 : null
+      showAllIssues = false
       stage = 'done'
       await tick()
       onTourReady()
@@ -277,6 +296,9 @@
 
     await messagesComplete
     feedback = data.result
+    currentIssueIndex = 0
+    activeIssue = feedback.issues?.length ? 0 : null
+    showAllIssues = false
     stage = 'done'
     await tick()
     onTourReady()
@@ -595,20 +617,74 @@
             </div>
 
             {#if feedback.issues.length}
-              <div class="issue-list">
-                {#each feedback.issues as issue, i}
-                  <button
-                    type="button"
-                    id="issue-card-{i}"
-                    aria-expanded={activeIssue === i || hoveredIssue === i}
-                    on:click={() => handleIssueCardSelect(i)}
-                    on:mouseenter={() => (hoveredIssue = i)}
-                    on:mouseleave={() => (hoveredIssue = null)}
-                    on:focus={() => (hoveredIssue = i)}
-                    on:blur={() => (hoveredIssue = null)}
-                    class:active={activeIssue === i || hoveredIssue === i}
-                    class="issue-card-item"
-                  >
+              {@const currentIssue = feedback.issues[currentIssueIndex]}
+              <article id="selected-issue-card" class="issue-card-item current-issue">
+                {#if currentIssue}
+                  <span class="issue-heading">
+                    <span class="issue-number">{currentIssueIndex + 1}</span>
+                    <span class="issue-section">{currentIssue.section}</span>
+                    {#if feedback.overall?.level === 'strong' && currentIssue.minor === true && getIssueColor(currentIssue) === 'orange'}
+                      <span class="issue-minor-tag">minor</span>
+                    {/if}
+                    <span class="issue-color-label">
+                      <i class="issue-color-marker {getIssueColor(currentIssue)}" aria-hidden="true"></i>
+                      {getIssueColorLabel(currentIssue)}
+                    </span>
+                  </span>
+                  <span class="issue-title">{currentIssue.issue}</span>
+                  <span class="issue-detail">
+                    <span class="solution-label">Suggested improvement</span>
+                    <span>{currentIssue.solution}</span>
+                  </span>
+                {/if}
+              </article>
+
+              <nav class="issue-navigation" aria-label="Review issue navigation">
+                <button
+                  type="button"
+                  class="issue-nav-button"
+                  disabled={currentIssueIndex === 0}
+                  on:click={() => navigateIssue(-1)}
+                >
+                  Previous
+                </button>
+                <span aria-live="polite">Issue {currentIssueIndex + 1} of {feedback.issues.length}</span>
+                <button
+                  type="button"
+                  class="issue-nav-button"
+                  disabled={currentIssueIndex >= feedback.issues.length - 1}
+                  on:click={() => navigateIssue(1)}
+                >
+                  Next
+                </button>
+              </nav>
+
+              {#if feedback.issues.length > 1}
+                <button
+                  type="button"
+                  class="issue-toggle-all"
+                  aria-expanded={showAllIssues}
+                  on:click={() => (showAllIssues = !showAllIssues)}
+                >
+                  {showAllIssues ? 'Hide all issues' : 'View all issues'}
+                </button>
+              {/if}
+
+              {#if showAllIssues}
+                <div class="issue-list" aria-label="All review issues">
+                  {#each feedback.issues as issue, i}
+                    <button
+                      type="button"
+                      id="issue-card-{i}"
+                      aria-current={currentIssueIndex === i ? 'true' : undefined}
+                      on:click={() => handleIssueCardSelect(i)}
+                      on:mouseenter={() => (hoveredIssue = i)}
+                      on:mouseleave={() => (hoveredIssue = null)}
+                      on:focus={() => (hoveredIssue = i)}
+                      on:blur={() => (hoveredIssue = null)}
+                      class:active={currentIssueIndex === i || hoveredIssue === i}
+                      class="issue-card-item"
+                    >
                     <span class="issue-heading">
                       <span class="issue-number">{i + 1}</span>
                       <span class="issue-section">{issue.section}</span>
@@ -619,18 +695,13 @@
                         <i class="issue-color-marker {getIssueColor(issue)}" aria-hidden="true"></i>
                         {getIssueColorLabel(issue)}
                       </span>
-                      <span class="issue-chevron" aria-hidden="true">{activeIssue === i || hoveredIssue === i ? '⌄' : '›'}</span>
+                      <span class="issue-chevron" aria-hidden="true">{currentIssueIndex === i ? '✓' : '›'}</span>
                     </span>
                     <span class="issue-title">{issue.issue}</span>
-                    {#if activeIssue === i || hoveredIssue === i}
-                      <span class="issue-detail">
-                        <span class="solution-label">Suggested improvement</span>
-                        <span>{issue.solution}</span>
-                      </span>
-                    {/if}
-                  </button>
-                {/each}
-              </div>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             {:else}
               <p class="empty-issues">No specific issues were identified for this resume.</p>
             {/if}
@@ -1175,6 +1246,55 @@
     margin-top: 14px;
   }
 
+  .issue-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-weight: 650;
+  }
+
+  .issue-nav-button {
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .issue-nav-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+    background: var(--surface);
+  }
+
+  .issue-nav-button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+  }
+
+  .issue-toggle-all {
+    display: block;
+    margin: 11px auto 0;
+    padding: 4px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .issue-toggle-all:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   .issue-card-item {
     width: 100%;
     padding: 10px 11px;
@@ -1185,6 +1305,12 @@
     text-align: left;
     cursor: pointer;
     transition: border-color .15s ease, background-color .15s ease;
+  }
+
+  .current-issue {
+    display: block;
+    margin-top: 14px;
+    cursor: default;
   }
 
   .issue-card-item:hover,
