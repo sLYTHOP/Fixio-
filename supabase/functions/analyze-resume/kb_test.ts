@@ -47,7 +47,7 @@ Deno.test("no must-haves in the knowledge base -> no summary", () => {
 })
 
 const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
-  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [], nextCerts: [] })
+  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [], nextCerts: [], skillIdeas: [] })
 const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
 
 Deno.test("issues get source label and priority, sorted high to low", () => {
@@ -99,6 +99,19 @@ Deno.test("every weak or irrelevant item becomes an issue, relevant items turn g
   assert(out.items.map((i) => i.color).join() === "green,red,orange", "item colors")
   assert(out.items[0].kbItems.join() === "MH1", "unknown ids dropped from items")
   assert(out.colorCounts.red === 1 && out.colorCounts.orange === 1 && out.colorCounts.green === 1, "counts")
+})
+
+Deno.test("a relevant skill without role knowledge-base support cannot be green", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([
+    item({ excerpt: "HTML", verdict: "relevant", kbItems: [] }),
+    item({ excerpt: "CSS", verdict: "relevant", kbItems: ["PA1"] }),
+    item({ excerpt: "Splunk", verdict: "relevant", kbItems: ["MH1"] }),
+  ]), kb, "SOC Analyst")
+
+  assert(out.items.map((it) => it.color).join() === "orange,orange,green", "only a role-supported skill is green")
+  assert(out.issues.some((issue) => issue.excerpt === "HTML" && issue.issue.includes("does not map")), "unsupported skill explains why it is weak")
+  assert(out.issues.some((issue) => issue.excerpt === "CSS" && issue.issue.includes("does not map")), "practitioner-only signals do not validate a skill")
 })
 
 Deno.test("a missing must-have gets a red issue even if the model raised none", () => {
@@ -184,13 +197,14 @@ Deno.test("core skills missing: a non-core skill turns weak and the fix names th
   assert(out.skillsMissing.map((m) => m.id).join() === "SP1,NH3", "valid ids only, no PA, no repeats: " + out.skillsMissing.map((m) => m.id).join())
   assert(out.items.map((i) => i.color).join() === "green,orange,orange,green", "colors: " + out.items.map((i) => i.color).join())
   const pe = out.issues.find((i) => i.excerpt === "Prompt Engineering")!
-  assert(pe.color === "orange" && pe.issue.includes("SOC Analyst") && pe.solution === "Consider making room for Security tools and Hands-on practice in place of it.", "text: " + pe.solution)
+  assert(pe.color === "orange" && pe.issue.includes("SOC Analyst") && pe.solution === "Consider listing Security tools or Hands-on practice here instead, if you have used them.", "text: " + pe.solution)
   assert(out.issues.find((i) => i.excerpt === "SIEM") === undefined, "core skill untouched")
 })
 
-Deno.test("no core skills missing: non-core skills are left as the model judged them", () => {
+Deno.test("a skill without a role knowledge-base match is weak even when core skills are covered", () => {
   const out = finalizeFeedback(withItems([item({ excerpt: "Prompt Engineering", kbItems: [] })]), parseKnowledgeBase(KB))
-  assert(out.items[0].color === "green" && out.issues.length === 0, "unchanged")
+  assert(out.items[0].color === "orange" && out.issues.length === 1, "unsupported skill is not green")
+  assert(out.issues[0].issue.includes("does not map") && out.issues[0].solution.includes("role-related skill"), "actionable explanation")
 })
 
 Deno.test("no project shows the role's work: one orange issue on the section, naming what is still needed", () => {
@@ -238,7 +252,7 @@ Deno.test("overall level: strong marks item issues minor and sorts them last, lo
   ], [{ id: "MH1", status: "missing", evidence: null }, { id: "MH2", status: "missing", evidence: null }, { id: "MH3", status: "missing", evidence: null }]), kb)
   assert(low.overall!.level === "low" && low.issues.every((i) => !i.minor), "low: no minor flags")
   assert(finalizeFeedback(base([], []), kb).overall === null, "no items, no overall")
-  const mid = finalizeFeedback(withItems([item({ excerpt: "a" }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
+  const mid = finalizeFeedback(withItems([item({ excerpt: "a", kbItems: ["MH1"] }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
     [{ id: "MH1", status: "present", evidence: "a" }, { id: "MH2", status: "partial", evidence: "b" }, { id: "MH3", status: "present", evidence: "c" }]), kb)
   assert(mid.overall!.level === "moderate", "moderate: " + mid.overall!.level)
 })
@@ -290,4 +304,40 @@ Deno.test("certification section: all foundational is orange with next steps, no
   assert(fine.issues.length === 0, "a role-level certification is enough")
   const unknown = finalizeFeedback(withItems([cert("Google Cert", null)]), kb)
   assert(unknown.issues.length === 0, "skipped when the model gave no levels")
+})
+
+Deno.test("each weak skill gets its own ideas from the shared list", () => {
+  const kb = parseKnowledgeBase(KB)
+  const parsed = withItems([
+    item({ excerpt: "HTML", kbItems: [], verdict: "weak", issue: "adjacent", solution: "x" }),
+    item({ excerpt: "CSS", kbItems: [], verdict: "irrelevant", issue: "off", solution: "x" }),
+    item({ excerpt: "Excel", kbItems: [], verdict: "weak", issue: "adjacent", solution: "x" }),
+    item({ excerpt: "SIEM", kbItems: ["MH1"] }),
+  ])
+  parsed.skillsMissing = ["SP1"]
+  parsed.skillIdeas = ["Linux", "Python", "Splunk SPL", "EDR", "Sysmon"]
+  const out = finalizeFeedback(parsed, kb)
+  const fix = (e: string) => out.issues.find((i) => i.excerpt === e)!.solution
+  assert(fix("HTML") === "Consider listing Linux or Python here instead, if you have used them.", fix("HTML"))
+  assert(fix("CSS") === "Consider listing Splunk SPL or EDR here instead, if you have used them.", fix("CSS"))
+  assert(fix("Excel") === "Consider listing Sysmon or Linux here instead, if you have used them.", fix("Excel") + " (wraps around)")
+  assert(!out.issues.some((i) => i.excerpt === "SIEM"), "core skill untouched")
+  // without ideas, the knowledge base item names are used instead
+  const plain = withItems([item({ excerpt: "HTML", kbItems: [], verdict: "weak", issue: "adjacent", solution: "x" })])
+  plain.skillsMissing = ["SP1"]
+  assert(finalizeFeedback(plain, kb).issues[0].solution === "Consider listing Security tools here instead, if you have used them.", "fallback to item names")
+})
+
+Deno.test("a partial must-have gets its own issue even when another issue points at the same item", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems(
+    [item({ excerpt: "monitoring and log review", verdict: "weak", kbItems: ["MH1"], issue: "vague", solution: "add detail" })],
+    [{ id: "MH1", status: "partial", evidence: "monitoring and log review", solution: "Name a SIEM." }]), kb)
+  const forMh1 = out.issues.filter((i) => i.kbItem === "MH1")
+  assert(forMh1.length === 2, "item issue plus the must-have issue: " + forMh1.length)
+  assert(forMh1.some((i) => i.solution === "Name a SIEM."), "must-have issue keeps the model's fix")
+  // but not when a section-level issue (no excerpt) already covers it
+  const covered = finalizeFeedback(withItems([], [{ id: "MH1", status: "partial", evidence: "x" }],
+    [{ section: "SKILLS", excerpt: null, issue: "no SIEM", solution: "add", kbItem: "MH1", kind: "weak" }]), kb)
+  assert(covered.issues.filter((i) => i.kbItem === "MH1").length === 1, "no duplicate section-level issue")
 })

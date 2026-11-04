@@ -245,3 +245,8 @@ Deno.test("parseFeedback: certLevel and nextCerts", () => {
   assert(out.nextCerts.join() === "CySA+,SC-200,Security+", "cleaned and capped at 3")
   assert(out.items[0].certLevel === "foundational" && out.items[1].certLevel === null, "levels")
 })
+
+Deno.test("parseFeedback: skillIdeas are trimmed, deduplicated and capped at 8", () => {
+  const out = parseFeedback(JSON.stringify({ strengths: ["a"], skillIdeas: [" Linux ", "linux", "Python", "A", "B", "C", "D", "E", "F", "G", ""] }))!
+  assert(out.skillIdeas.length === 8 && out.skillIdeas[0] === "Linux" && out.skillIdeas[1] === "Python", out.skillIdeas.join())
+})

@@ -36,6 +36,7 @@ export type Feedback = {
   items: Item[]
   skillsMissing: string[] // knowledge base item ids a strong skills section would show but this one lacks
   nextCerts: string[] // up to 3 certifications from the knowledge base that are the next step
+  skillIdeas: string[] // up to 8 short skill names a candidate could list instead of a weak skill
   mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
@@ -249,6 +250,12 @@ export async function runWithFallback(attempts: Attempt[], plan: Plan, deps: Dep
 const strList = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim()) : []
 
+// Removes repeats ignoring case, keeping the first spelling.
+const firstOfEach = (list: string[]): string[] => {
+  const seen = new Set<string>()
+  return list.filter((x) => !seen.has(x.toLowerCase()) && !!seen.add(x.toLowerCase()))
+}
+
 const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
 const ISSUE_KINDS = new Set(["missing", "weak", "error"])
 const CERT_LEVELS = new Set(["role", "foundational", "unrelated"])
@@ -318,6 +325,7 @@ export function parseFeedback(text: string): Feedback | null {
       }),
     skillsMissing: strList(raw.skillsMissing).map((x) => x.toUpperCase()),
     nextCerts: strList(raw.nextCerts).slice(0, 3),
+    skillIdeas: firstOfEach(strList(raw.skillIdeas)).slice(0, 8),
     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
       .map((m: any) => ({

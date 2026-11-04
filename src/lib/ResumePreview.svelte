@@ -51,6 +51,17 @@
       .trim()
   }
 
+  function findWholePhrase(text, phrase, start, end) {
+    let match = text.indexOf(phrase, start)
+    while (match >= 0 && match + phrase.length <= end) {
+      const startsAtBoundary = match === 0 || text[match - 1] === ' '
+      const endsAtBoundary = match + phrase.length === text.length || text[match + phrase.length] === ' '
+      if (startsAtBoundary && endsAtBoundary) return match
+      match = text.indexOf(phrase, match + 1)
+    }
+    return -1
+  }
+
   function findTextMatches(items, query, section = null, sectionHeadings = []) {
     const normalizedQuery = normalizeText(query)
     if (!normalizedQuery) return []
@@ -78,31 +89,33 @@
       }
     })
 
-    let searchStart = 0
-    let searchEnd = normalizedText.length
     const normalizedSection = normalizeText(section ?? '')
     if (normalizedSection) {
-      const sectionStart = normalizedText.indexOf(normalizedSection)
-      if (sectionStart >= 0) {
-        searchStart = sectionStart
-        const sectionContentStart = sectionStart + normalizedSection.length
-        for (const heading of sectionHeadings) {
-          const normalizedHeading = normalizeText(heading)
-          if (!normalizedHeading || normalizedHeading === normalizedSection) continue
-          const headingStart = normalizedText.indexOf(normalizedHeading, sectionContentStart)
-          if (headingStart >= 0) searchEnd = Math.min(searchEnd, headingStart)
+      const normalizedHeadings = [...new Set(sectionHeadings.map(normalizeText).filter(Boolean))]
+        .filter((heading) => heading !== normalizedSection)
+      let sectionStart = findWholePhrase(normalizedText, normalizedSection, 0, normalizedText.length)
+      while (sectionStart >= 0) {
+        const contentStart = sectionStart + normalizedSection.length
+        let contentEnd = normalizedText.length
+        for (const heading of normalizedHeadings) {
+          const headingStart = findWholePhrase(normalizedText, heading, contentStart, normalizedText.length)
+          if (headingStart >= 0) contentEnd = Math.min(contentEnd, headingStart)
         }
+        const match = findWholePhrase(normalizedText, normalizedQuery, contentStart, contentEnd)
+        if (match >= 0) {
+          return collectTextMatch(positions, match, match + normalizedQuery.length)
+        }
+        sectionStart = findWholePhrase(normalizedText, normalizedSection, sectionStart + 1, normalizedText.length)
       }
+      return []
     }
 
-    let start = normalizedText.indexOf(normalizedQuery, searchStart)
-    if (start < 0 || start + normalizedQuery.length > searchEnd) {
-      searchStart = 0
-      searchEnd = normalizedText.length
-      start = normalizedText.indexOf(normalizedQuery)
-    }
+    const start = findWholePhrase(normalizedText, normalizedQuery, 0, normalizedText.length)
     if (start < 0) return []
-    const end = start + normalizedQuery.length
+    return collectTextMatch(positions, start, start + normalizedQuery.length)
+  }
+
+  function collectTextMatch(positions, start, end) {
     const rangesByItem = new Map()
     for (const position of positions.slice(start, end)) {
       if (!position) continue

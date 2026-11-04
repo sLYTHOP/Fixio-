@@ -28,7 +28,7 @@ export type FinalItem = Item & { color: ItemColor; issueIndex: number | null }
 export type ColorCounts = { red: number; orange: number; green: number }
 export type OverallLevel = "strong" | "moderate" | "low"
 export type Overall = { level: OverallLevel; note: string }
-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing"> & {
+export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing" | "skillIdeas"> & {
   issues: FinalIssue[]
   items: FinalItem[]
   colorCounts: ColorCounts
@@ -138,17 +138,43 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     const k = byId.get(id)
     return !!k && (k.tier === "MH" || k.tier === "SP")
   })
+  const hasRoleSupport = (it: Item) => it.kbItems.some((id) => {
+    const k = byId.get(id)
+    return !!k && k.tier !== "PA"
+  })
 
-  // While core skills are absent, a skill that supports no must-have or strongly preferred item
-  // is weak: it takes space the missing skills could use. The fix names those skills.
+  // A relevant skill needs a non-practitioner knowledge-base match. When core skills are also
+  // absent, non-core skills are weak because they take space the missing skills could use.
+  // Each flagged skill gets its own two ideas from a shared list.
+  const pool = parsed.skillIdeas.length ? parsed.skillIdeas : missingNames
+  let next = 0
+  const ideasFor = (): string => {
+    if (!pool.length) return ""
+    const picked = [pool[next % pool.length]]
+    if (pool.length > 1) picked.push(pool[(next + 1) % pool.length])
+    next += 2
+    return listOf(picked).replace(" and ", " or ")
+  }
   const items0: Item[] = parsed.items.map((it) => {
-    if (it.kind !== "skill" || !missingNames.length || isCore(it)) return it
+    if (it.kind !== "skill") return it
+    const unsupportedRelevantSkill = kb.length > 0 && it.verdict === "relevant" && !hasRoleSupport(it)
+    const missingCoreSkill = missingNames.length > 0 && !isCore(it)
+    if (!unsupportedRelevantSkill && !missingCoreSkill) return it
     const names = listOf(missingNames.slice(0, 3))
+    const ideas = ideasFor()
     return {
       ...it,
       verdict: it.verdict === "relevant" ? "weak" : it.verdict,
-      issue: it.verdict === "relevant" ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names}.` : it.issue,
-      solution: `Consider making room for ${names} in place of it.`,
+      issue: unsupportedRelevantSkill
+        ? `This skill does not map to a skill in the knowledge base for ${roleLabel}.`
+        : it.verdict === "relevant"
+          ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names}.`
+          : it.issue,
+      solution: ideas
+        ? `Consider listing ${ideas} here instead, if you have used them.`
+        : missingNames.length
+          ? "Consider making room for a core skill in place of it."
+          : "Consider using this space for a role-related skill from the knowledge base that you have used.",
     }
   })
 
@@ -228,7 +254,8 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
           kind: "missing",
         }, "red"))
       }
-    } else if (!linked.length) {
+    } else if (!linked.some((i) => i.excerpt === null)) {
+      // A partial must-have always gets its own issue, even when other issues point at the same item.
       const short = shortLabel(m.label)
       all.push(make({
         section: reported?.section ?? "Overall",
@@ -332,7 +359,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     if (suggestions.length === 6) break
   }
 
-  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, ...rest } = parsed
+  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, skillIdeas: _si, ...rest } = parsed
   return {
     ...rest,
     suggestions,
