@@ -1,5 +1,5 @@
 // Run: deno test llm_test.ts   (no network, all provider calls are faked)
-import { buildGeminiBody, callClaude, callGemini, parseFeedback, runWithFallback, type Attempt, type RunResult } from "./llm.ts"
+import { planAttempts, buildGeminiBody, callClaude, callGemini, parseFeedback, runWithFallback, type Attempt, type RunResult } from "./llm.ts"
 
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
 function mustFail(r: RunResult) { if (r.ok) throw new Error("FAILED: expected a failure"); return r }
@@ -208,12 +208,12 @@ Deno.test("parseFeedback: roleWork and skillsMissing", () => {
     strengths: ["a"],
     skillsMissing: [" nh13 ", "SP3", 4, ""],
     items: [
-      { section: "PROJECTS", kind: "project", excerpt: "x", verdict: "weak", roleWork: false },
-      { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant", roleWork: "yes" },
+      { section: "PROJECTS", kind: "project", excerpt: "x", verdict: "weak", roleWork: "none" },
+      { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant", roleWork: "yes", fit: "Core" },
     ],
   }))!
   assert(out.skillsMissing.join() === "NH13,SP3", "ids cleaned")
-  assert(out.items[0].roleWork === false && out.items[1].roleWork === null, "roleWork is a boolean or null")
+  assert(out.items[0].roleWork === "none" && out.items[1].roleWork === null && out.items[1].fit === "core" && out.items[0].fit === null, "roleWork and fit are known values or null")
 })
 
 Deno.test("usage is read from both providers", async () => {
@@ -249,4 +249,21 @@ Deno.test("parseFeedback: certLevel and nextCerts", () => {
 Deno.test("parseFeedback: skillIdeas are trimmed, deduplicated and capped at 8", () => {
   const out = parseFeedback(JSON.stringify({ strengths: ["a"], skillIdeas: [" Linux ", "linux", "Python", "A", "B", "C", "D", "E", "F", "G", ""] }))!
   assert(out.skillIdeas.length === 8 && out.skillIdeas[0] === "Linux" && out.skillIdeas[1] === "Python", out.skillIdeas.join())
+})
+
+Deno.test("parseFeedback: handsOnIdeas are capped at 3", () => {
+  const out = parseFeedback(JSON.stringify({ strengths: ["a"], handsOnIdeas: ["one", "ONE", "two", "three", "four"] }))!
+  assert(out.handsOnIdeas.join() === "one,two,three", out.handsOnIdeas.join())
+})
+
+Deno.test("planAttempts: order, several Claude models, missing keys", () => {
+  const base = { provider: "claude", fallback: "none", geminiKey: "g", geminiModels: ["g1", "g2"], anthropicKey: "a", claudeModels: ["c1", "c2"] }
+  const names = (c: Parameters<typeof planAttempts>[0]) => planAttempts(c).map((a) => `${a.provider}/${a.model}`).join()
+  assert(names(base) === "claude/c1,claude/c2", names(base))
+  assert(names({ ...base, fallback: "gemini" }) === "claude/c1,claude/c2,gemini/g1,gemini/g2", "claude first, gemini as backup")
+  assert(names({ ...base, provider: "gemini", fallback: "claude" }) === "gemini/g1,gemini/g2,claude/c1,claude/c2", "gemini first")
+  assert(names({ ...base, fallback: "claude" }) === "claude/c1,claude/c2", "same provider is not repeated")
+  assert(names({ ...base, anthropicKey: "" }) === "", "no key, nothing to try")
+  assert(names({ ...base, anthropicKey: "", fallback: "gemini" }) === "gemini/g1,gemini/g2", "a provider without a key is skipped")
+  assert(planAttempts(base).every((a) => a.tries === 2), "two tries each")
 })

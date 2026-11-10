@@ -3,7 +3,7 @@
 // entry, sends both to Claude, and returns structured skill-gap feedback.
 
 import { createClient } from "npm:@supabase/supabase-js@2"
-import { parseFeedback, runWithFallback, type Attempt } from "./llm.ts"
+import { parseFeedback, planAttempts, runWithFallback } from "./llm.ts"
 import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
 
 // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
@@ -16,25 +16,30 @@ const GEMINI_MODELS = (Deno.env.get("GEMINI_MODELS") ?? Deno.env.get("GEMINI_MOD
   .split(",").map((m) => m.trim()).filter(Boolean)
 // Optional second provider, used only if the first one keeps failing: "claude", "gemini" or "none" (default).
 const LLM_FALLBACK = (Deno.env.get("LLM_FALLBACK") ?? "none").toLowerCase()
-const CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+// Comma-separated list, tried in order (a second model is the backup if the first is busy). Set the
+// CLAUDE_MODELS secret to change it without touching code. CLAUDE_MODEL with a single name also works.
+const CLAUDE_MODELS = (Deno.env.get("CLAUDE_MODELS") ?? Deno.env.get("CLAUDE_MODEL") ?? "claude-haiku-4-5-20251001")
+  .split(",").map((m) => m.trim()).filter(Boolean)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
 // Bump when analysis prompt or output semantics change.
-const ANALYSIS_VERSION = "6"
+const ANALYSIS_VERSION = "7"
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
-function buildAttempts(): Attempt[] {
-  const gemini = (): Attempt[] =>
-    GEMINI_API_KEY ? GEMINI_MODELS.map((model) => ({ provider: "gemini" as const, model, apiKey: GEMINI_API_KEY, tries: 2 })) : []
-  const claude = (): Attempt[] =>
-    ANTHROPIC_API_KEY ? [{ provider: "claude" as const, model: CLAUDE_MODEL, apiKey: ANTHROPIC_API_KEY, tries: 2 }] : []
-  const order = [LLM_PROVIDER, ...(LLM_FALLBACK !== "none" && LLM_FALLBACK !== LLM_PROVIDER ? [LLM_FALLBACK] : [])]
-  return order.flatMap((p) => (p === "gemini" ? gemini() : p === "claude" ? claude() : []))
+function buildAttempts() {
+  return planAttempts({
+    provider: LLM_PROVIDER,
+    fallback: LLM_FALLBACK,
+    geminiKey: GEMINI_API_KEY,
+    geminiModels: GEMINI_MODELS,
+    anthropicKey: ANTHROPIC_API_KEY,
+    claudeModels: CLAUDE_MODELS,
+  })
 }
 
 function slugify(s: string) {
@@ -159,17 +164,18 @@ Instructions:
 - Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
 - Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
 - Split the resume into items and give EVERY item a verdict under "items", so that all the content of the resume is covered. One item for each: individual skill listed in a skills section (split every list on its commas, so each tool, technique or concept gets its own item, and never put skills of different fit in one item; the excerpt is just that skill's own words), bullet point under an experience entry or project (one item per bullet), certification or course, line of education detail, and sentence or line of a summary or profile. Do not make items for the candidate's name, contact details, section headings, dates, employer and institution names, or extracurricular, volunteering and hobby sections.
-- Verdicts. "relevant" = a direct match: it names a concept, tool or skill that one of the knowledge base items describes, or it shows that work being done. "weak" = adjacent: related to security or IT in general, or a loosely related activity, but not what this role does day to day or asks for. "irrelevant" = unrelated to security and IT work (for example presentation software, web design, an unrelated course). When unsure between "relevant" and "weak", choose "weak". Map an item to a knowledge base item (kbItems) only if it matches that item's own wording: a related but different activity (for example hands-on offensive testing compared with supporting vulnerability management) is adjacent, not a match.
-- Judge the resume as a whole. Skills that are not specific to this role but are normal in security teams today (for example AI or prompt engineering, research skills, analytical reasoning, communication) are "relevant" when the rest of the resume is on topic. A non-security skill (for example product management) is "weak", and you say so gently. The code later marks non-core skills as weak when core skills are absent from the skills section, so your job is to fill "skillsMissing" and "kbItems" honestly.
-- kbItems for a skill lists only the knowledge base items it directly supports. Do not map skills based on a superficial association: for a SOC/security-operations role, HTML and CSS are not matches for HTTP/HTTPS networking. A tool or skill that the knowledge base does not name and that the role does not use day to day (for example offensive testing tools or web-development skills in a SOC role) gets [] for kbItems and must not be marked relevant.
+- Verdicts, which decide the colors. For SKILLS set "fit": "core" = names a concept, tool or skill that one of the knowledge base items describes; "adjacent" = a security skill the role does not rely on day to day (for example offensive testing tools such as Kali Linux, Burp Suite or Nmap, privacy or compliance frameworks); "offrole" = an IT, software or professional skill with no use in this role (for example web design, databases, a code editor, spreadsheets, product management); "unrelated" = nothing to do with security or IT work (for example presentation software, an unrelated course); "soft" = a soft skill such as communication, teamwork or analytical thinking. For CERTIFICATIONS set certLevel. For EXPERIENCE entries and PROJECTS set roleWork. The "verdict" you give every item must agree with that: "relevant", "weak" (related but not what the role asks for, or without enough evidence) or "irrelevant" (nothing to do with security or IT). Map an item to a knowledge base item (kbItems) only if it matches that item's own wording: a related but different activity (for example hands-on offensive testing compared with supporting vulnerability management) is not a match.
+- Soft skills are never a problem: fit "soft", verdict "relevant". Skills that are normal in security teams today (for example AI or prompt engineering, research skills) are "adjacent", not "unrelated".
+- kbItems for a skill lists only the knowledge base items it directly supports. A tool or skill that the knowledge base does not name and that the role does not use day to day (for example offensive testing tools, or non-security skills) gets [] for kbItems.
 - "skillsMissing": the IDs of up to 5 knowledge base items of the kind a skills section lists (tools, platforms, techniques, concepts) that a strong skills section for this role would show but the candidate's skills section does not. Most important first. [] if the skills section already covers them. Never include [PA#] items.
 - "skillIdeas": up to 8 short names (one to four words each, such as a tool, platform or technique) taken from the knowledge base items your skillsMissing refer to, that a candidate could list in a skills section instead of a weak skill. Most useful first. Plain names only, no sentences.
-- "roleWork" is for experience and project items only: true when the item shows work the role does day to day (as described by the must-have items), not just knowledge or a related field; false otherwise. For all other items use null. Vulnerability scanning alone or building a product does not count as the role's day-to-day work unless the knowledge base says it does.
+- "handsOnIdeas": up to 3 hands-on project or lab ideas taken from the knowledge base (for example from its fix ideas), each one short sentence that names the tool and what to produce. Used to tell the candidate what to build when no experience or project shows the role's work.
+- "roleWork" is for experience entries and project bullets only (null for everything else). "clear" = shows work the role does day to day (as described by the must-have items) AND gives enough evidence: the tool or platform used, what was done, and the outcome or scale. "thin" = mentions that kind of work but without enough evidence: a keyword such as "log monitoring" or "incident response" on its own is "thin", not "clear". "none" = security-related or not, but not the role's day-to-day work (for example vulnerability testing, writing security documentation, building a model). Be strict: when in doubt, choose the lower level.
 - A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
 - Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. A certification unrelated to security and IT is "irrelevant". For every certification item also set certLevel: "role" = aimed at the work of this role or above the foundational level on the knowledge base's ladder, "foundational" = an entry-level security or IT certification, "unrelated" = not about security or IT. Under "nextCerts" list up to 3 certification names from the knowledge base that are the next step beyond what the candidate already holds ([] if the candidate already holds role-level ones). Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
-- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null.
-- Tone of every issue and solution: polite and encouraging, written to the candidate ("consider", "you could"). Never say "remove", "replace" or "list this under" without saying exactly which words are meant and what to put instead. Name the exact skill, bullet, project or certification the fix is about. For an item in a skills list, never tell the candidate to "explain how it was used": a skills list only holds keywords. Suggest showing it in a bullet instead.
-- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
+- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork (experience and projects only) and certLevel (certifications only); null for the others.
+- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead.
+- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. A keyword alone is not evidence: "present" needs what was done, with which tool, and the outcome or scale; a bullet that only says "log monitoring" or "incident response" is "partial". For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
 - Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
 - Where the resume is already strong in an area, mark the items "relevant" and say so under strengths, as plain short phrases of at most 12 words with no praise words such as "gold-standard". Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
 - Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
@@ -185,7 +191,8 @@ Instructions:
       "excerpt": "exact contiguous resume text",
       "verdict": "relevant | weak | irrelevant",
       "kbItems": ["MH1", "SP2"],
-      "roleWork": true,
+      "fit": "core | adjacent | offrole | unrelated | soft, for skills only, else null",
+      "roleWork": "clear | thin | none, for experience and projects only, else null",
       "certLevel": "role | foundational | unrelated, for certifications only, else null",
       "issue": "what is weak and why it matters, or null when relevant",
       "solution": "a concrete, role-relevant way to improve it, or null when relevant"
@@ -193,6 +200,7 @@ Instructions:
   ],
   "skillsMissing": ["SP3", "NH13"],
   "skillIdeas": ["Linux", "Python scripting"],
+  "handsOnIdeas": ["Triage sample alerts in a free SIEM and write each case up as a ticket-style note"],
   "nextCerts": ["certification name from the knowledge base"],
   "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null", "section": "where the fix belongs, or null when present", "solution": "one concrete sentence, or null when present"}],
   "gaps": ["short phrase with a brief why-it-matters", "..."],

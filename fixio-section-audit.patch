@@ -1,0 +1,736 @@
+diff --git a/supabase/functions/analyze-resume/index.ts b/supabase/functions/analyze-resume/index.ts
+index f7c943e..a369982 100644
+--- a/supabase/functions/analyze-resume/index.ts
++++ b/supabase/functions/analyze-resume/index.ts
+@@ -3,7 +3,7 @@
+ // entry, sends both to Claude, and returns structured skill-gap feedback.
+ 
+ import { createClient } from "npm:@supabase/supabase-js@2"
+-import { parseFeedback, runWithFallback, type Attempt } from "./llm.ts"
++import { parseFeedback, planAttempts, runWithFallback } from "./llm.ts"
+ import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
+ 
+ // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
+@@ -16,25 +16,30 @@ const GEMINI_MODELS = (Deno.env.get("GEMINI_MODELS") ?? Deno.env.get("GEMINI_MOD
+   .split(",").map((m) => m.trim()).filter(Boolean)
+ // Optional second provider, used only if the first one keeps failing: "claude", "gemini" or "none" (default).
+ const LLM_FALLBACK = (Deno.env.get("LLM_FALLBACK") ?? "none").toLowerCase()
+-const CLAUDE_MODEL = "claude-haiku-4-5-20251001"
++// Comma-separated list, tried in order (a second model is the backup if the first is busy). Set the
++// CLAUDE_MODELS secret to change it without touching code. CLAUDE_MODEL with a single name also works.
++const CLAUDE_MODELS = (Deno.env.get("CLAUDE_MODELS") ?? Deno.env.get("CLAUDE_MODEL") ?? "claude-haiku-4-5-20251001")
++  .split(",").map((m) => m.trim()).filter(Boolean)
+ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
+ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+ const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+ // Bump when analysis prompt or output semantics change.
+-const ANALYSIS_VERSION = "6"
++const ANALYSIS_VERSION = "7"
+ 
+ async function sha256Hex(bytes: Uint8Array) {
+   const digest = await crypto.subtle.digest("SHA-256", bytes)
+   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+ }
+ 
+-function buildAttempts(): Attempt[] {
+-  const gemini = (): Attempt[] =>
+-    GEMINI_API_KEY ? GEMINI_MODELS.map((model) => ({ provider: "gemini" as const, model, apiKey: GEMINI_API_KEY, tries: 2 })) : []
+-  const claude = (): Attempt[] =>
+-    ANTHROPIC_API_KEY ? [{ provider: "claude" as const, model: CLAUDE_MODEL, apiKey: ANTHROPIC_API_KEY, tries: 2 }] : []
+-  const order = [LLM_PROVIDER, ...(LLM_FALLBACK !== "none" && LLM_FALLBACK !== LLM_PROVIDER ? [LLM_FALLBACK] : [])]
+-  return order.flatMap((p) => (p === "gemini" ? gemini() : p === "claude" ? claude() : []))
++function buildAttempts() {
++  return planAttempts({
++    provider: LLM_PROVIDER,
++    fallback: LLM_FALLBACK,
++    geminiKey: GEMINI_API_KEY,
++    geminiModels: GEMINI_MODELS,
++    anthropicKey: ANTHROPIC_API_KEY,
++    claudeModels: CLAUDE_MODELS,
++  })
+ }
+ 
+ function slugify(s: string) {
+@@ -159,17 +164,18 @@ Instructions:
+ - Knowledge base items carry IDs: [MH#] must-have, [SP#] strongly preferred, [NH#] nice-to-have, [PA#] practitioner-added (not from job postings, pending review).
+ - Review the WHOLE resume, section by section. Do not stop after the first problems you find and do not skip a section.
+ - Split the resume into items and give EVERY item a verdict under "items", so that all the content of the resume is covered. One item for each: individual skill listed in a skills section (split every list on its commas, so each tool, technique or concept gets its own item, and never put skills of different fit in one item; the excerpt is just that skill's own words), bullet point under an experience entry or project (one item per bullet), certification or course, line of education detail, and sentence or line of a summary or profile. Do not make items for the candidate's name, contact details, section headings, dates, employer and institution names, or extracurricular, volunteering and hobby sections.
+-- Verdicts. "relevant" = a direct match: it names a concept, tool or skill that one of the knowledge base items describes, or it shows that work being done. "weak" = adjacent: related to security or IT in general, or a loosely related activity, but not what this role does day to day or asks for. "irrelevant" = unrelated to security and IT work (for example presentation software, web design, an unrelated course). When unsure between "relevant" and "weak", choose "weak". Map an item to a knowledge base item (kbItems) only if it matches that item's own wording: a related but different activity (for example hands-on offensive testing compared with supporting vulnerability management) is adjacent, not a match.
+-- Judge the resume as a whole. Skills that are not specific to this role but are normal in security teams today (for example AI or prompt engineering, research skills, analytical reasoning, communication) are "relevant" when the rest of the resume is on topic. A non-security skill (for example product management) is "weak", and you say so gently. The code later marks non-core skills as weak when core skills are absent from the skills section, so your job is to fill "skillsMissing" and "kbItems" honestly.
+-- kbItems for a skill lists only the knowledge base items it directly supports. Do not map skills based on a superficial association: for a SOC/security-operations role, HTML and CSS are not matches for HTTP/HTTPS networking. A tool or skill that the knowledge base does not name and that the role does not use day to day (for example offensive testing tools or web-development skills in a SOC role) gets [] for kbItems and must not be marked relevant.
++- Verdicts, which decide the colors. For SKILLS set "fit": "core" = names a concept, tool or skill that one of the knowledge base items describes; "adjacent" = a security skill the role does not rely on day to day (for example offensive testing tools such as Kali Linux, Burp Suite or Nmap, privacy or compliance frameworks); "offrole" = an IT, software or professional skill with no use in this role (for example web design, databases, a code editor, spreadsheets, product management); "unrelated" = nothing to do with security or IT work (for example presentation software, an unrelated course); "soft" = a soft skill such as communication, teamwork or analytical thinking. For CERTIFICATIONS set certLevel. For EXPERIENCE entries and PROJECTS set roleWork. The "verdict" you give every item must agree with that: "relevant", "weak" (related but not what the role asks for, or without enough evidence) or "irrelevant" (nothing to do with security or IT). Map an item to a knowledge base item (kbItems) only if it matches that item's own wording: a related but different activity (for example hands-on offensive testing compared with supporting vulnerability management) is not a match.
++- Soft skills are never a problem: fit "soft", verdict "relevant". Skills that are normal in security teams today (for example AI or prompt engineering, research skills) are "adjacent", not "unrelated".
++- kbItems for a skill lists only the knowledge base items it directly supports. A tool or skill that the knowledge base does not name and that the role does not use day to day (for example offensive testing tools, or non-security skills) gets [] for kbItems.
+ - "skillsMissing": the IDs of up to 5 knowledge base items of the kind a skills section lists (tools, platforms, techniques, concepts) that a strong skills section for this role would show but the candidate's skills section does not. Most important first. [] if the skills section already covers them. Never include [PA#] items.
+ - "skillIdeas": up to 8 short names (one to four words each, such as a tool, platform or technique) taken from the knowledge base items your skillsMissing refer to, that a candidate could list in a skills section instead of a weak skill. Most useful first. Plain names only, no sentences.
+-- "roleWork" is for experience and project items only: true when the item shows work the role does day to day (as described by the must-have items), not just knowledge or a related field; false otherwise. For all other items use null. Vulnerability scanning alone or building a product does not count as the role's day-to-day work unless the knowledge base says it does.
++- "handsOnIdeas": up to 3 hands-on project or lab ideas taken from the knowledge base (for example from its fix ideas), each one short sentence that names the tool and what to produce. Used to tell the candidate what to build when no experience or project shows the role's work.
++- "roleWork" is for experience entries and project bullets only (null for everything else). "clear" = shows work the role does day to day (as described by the must-have items) AND gives enough evidence: the tool or platform used, what was done, and the outcome or scale. "thin" = mentions that kind of work but without enough evidence: a keyword such as "log monitoring" or "incident response" on its own is "thin", not "clear". "none" = security-related or not, but not the role's day-to-day work (for example vulnerability testing, writing security documentation, building a model). Be strict: when in doubt, choose the lower level.
+ - A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
+ - Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. A certification unrelated to security and IT is "irrelevant". For every certification item also set certLevel: "role" = aimed at the work of this role or above the foundational level on the knowledge base's ladder, "foundational" = an entry-level security or IT certification, "unrelated" = not about security or IT. Under "nextCerts" list up to 3 certification names from the knowledge base that are the next step beyond what the candidate already holds ([] if the candidate already holds role-level ones). Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
+-- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null.
+-- Tone of every issue and solution: polite and encouraging, written to the candidate ("consider", "you could"). Never say "remove", "replace" or "list this under" without saying exactly which words are meant and what to put instead. Name the exact skill, bullet, project or certification the fix is about. For an item in a skills list, never tell the candidate to "explain how it was used": a skills list only holds keywords. Suggest showing it in a bullet instead.
+-- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
++- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork (experience and projects only) and certLevel (certifications only); null for the others.
++- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead.
++- Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. A keyword alone is not evidence: "present" needs what was done, with which tool, and the outcome or scale; a bullet that only says "log monitoring" or "incident response" is "partial". For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
+ - Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
+ - Where the resume is already strong in an area, mark the items "relevant" and say so under strengths, as plain short phrases of at most 12 words with no praise words such as "gold-standard". Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
+ - Dates: today is ${today}. Any date on or before today is valid, even a recent one. Raise a date issue only if a date is after today or an end date is before its start date.
+@@ -185,7 +191,8 @@ Instructions:
+       "excerpt": "exact contiguous resume text",
+       "verdict": "relevant | weak | irrelevant",
+       "kbItems": ["MH1", "SP2"],
+-      "roleWork": true,
++      "fit": "core | adjacent | offrole | unrelated | soft, for skills only, else null",
++      "roleWork": "clear | thin | none, for experience and projects only, else null",
+       "certLevel": "role | foundational | unrelated, for certifications only, else null",
+       "issue": "what is weak and why it matters, or null when relevant",
+       "solution": "a concrete, role-relevant way to improve it, or null when relevant"
+@@ -193,6 +200,7 @@ Instructions:
+   ],
+   "skillsMissing": ["SP3", "NH13"],
+   "skillIdeas": ["Linux", "Python scripting"],
++  "handsOnIdeas": ["Triage sample alerts in a free SIEM and write each case up as a ticket-style note"],
+   "nextCerts": ["certification name from the knowledge base"],
+   "mustHaves": [{"id": "MH1", "status": "present | partial | missing", "evidence": "short exact quote from the resume, or null", "section": "where the fix belongs, or null when present", "solution": "one concrete sentence, or null when present"}],
+   "gaps": ["short phrase with a brief why-it-matters", "..."],
+diff --git a/supabase/functions/analyze-resume/kb.ts b/supabase/functions/analyze-resume/kb.ts
+index e77813f..08b9b28 100644
+--- a/supabase/functions/analyze-resume/kb.ts
++++ b/supabase/functions/analyze-resume/kb.ts
+@@ -24,11 +24,13 @@ export type ItemColor = IssueColor | "green"
+ export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor; minor: boolean }
+ // issueIndex: position of this item's issue in the sorted issues list, so a mark on the resume can open that
+ // issue. null for relevant items. red is used for skills and certifications that have nothing to do with the field.
+-export type FinalItem = Item & { color: ItemColor; issueIndex: number | null }
++// grade: how much the item helps for this role, the same three levels in every section (the base for scoring).
++export type Grade = "core" | "thin" | "irrelevant"
++export type FinalItem = Item & { color: ItemColor; issueIndex: number | null; grade: Grade }
+ export type ColorCounts = { red: number; orange: number; green: number }
+ export type OverallLevel = "strong" | "moderate" | "low"
+ export type Overall = { level: OverallLevel; note: string }
+-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing" | "skillIdeas"> & {
++export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing" | "skillIdeas" | "handsOnIdeas"> & {
+   issues: FinalIssue[]
+   items: FinalItem[]
+   colorCounts: ColorCounts
+@@ -95,6 +97,25 @@ const listOf = (names: string[]) =>
+ const itemColor = (it: Item): ItemColor =>
+   it.verdict === "relevant" ? "green" : it.verdict === "irrelevant" && (it.kind === "skill" || it.kind === "certification") ? "red" : "orange"
+ 
++// The same three levels for every kind of item, computed from the labels the model gave and the final verdict.
++// Skills: core and soft count as core; adjacent and off-role skills are thin. Certifications: role-level is core,
++// foundational is thin. Experience and projects: only clear evidence is core. Anything unrelated to security
++// and IT is irrelevant. When the model gave no label, the verdict decides.
++export function gradeOf(original: Item, final: Item): Grade {
++  const byVerdict = (): Grade => (final.verdict === "relevant" ? "core" : final.verdict === "weak" ? "thin" : "irrelevant")
++  if (final.verdict === "irrelevant") return "irrelevant"
++  if (original.kind === "skill" && original.fit) {
++    return original.fit === "unrelated" ? "irrelevant" : original.fit === "core" || original.fit === "soft" ? "core" : "thin"
++  }
++  if (original.kind === "certification" && original.certLevel) {
++    return original.certLevel === "unrelated" ? "irrelevant" : original.certLevel === "role" ? "core" : "thin"
++  }
++  if ((original.kind === "experience" || original.kind === "project") && original.roleWork) {
++    return original.roleWork === "clear" && final.verdict === "relevant" ? "core" : "thin"
++  }
++  return byVerdict()
++}
++
+ // Red for errors and for a must-have that is missing. Everything else is weak: orange.
+ export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
+   if (kind === "error") return "red"
+@@ -108,7 +129,7 @@ export function overallFor(items: Item[], summary: MustHaveSummary | null): Over
+   if (!items.length) return null
+   const share = items.filter((i) => i.verdict === "relevant").length / items.length
+   const coverage = summary && summary.total ? summary.shown / summary.total : null
+-  const hasRoleWork = items.some((i) => i.roleWork === true)
++  const hasRoleWork = items.some((i) => i.roleWork === "clear")
+   const anyRoleWorkInfo = items.some((i) => i.roleWork !== null)
+   const counts = summary ? `${summary.shown} of ${summary.total} must-haves shown` : null
+   if ((coverage !== null && coverage < 0.5) || share < 0.4) {
+@@ -138,14 +159,9 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+     const k = byId.get(id)
+     return !!k && (k.tier === "MH" || k.tier === "SP")
+   })
+-  const hasRoleSupport = (it: Item) => it.kbItems.some((id) => {
+-    const k = byId.get(id)
+-    return !!k && k.tier !== "PA"
+-  })
+ 
+-  // A relevant skill needs a non-practitioner knowledge-base match. When core skills are also
+-  // absent, non-core skills are weak because they take space the missing skills could use.
+-  // Each flagged skill gets its own two ideas from a shared list.
++  // Ideas for what to list instead of a weak skill. Each flagged skill takes the next two from a shared
++  // list, so neighbouring skills do not all get the same advice.
+   const pool = parsed.skillIdeas.length ? parsed.skillIdeas : missingNames
+   let next = 0
+   const ideasFor = (): string => {
+@@ -155,27 +171,70 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+     next += 2
+     return listOf(picked).replace(" and ", " or ")
+   }
+-  const items0: Item[] = parsed.items.map((it) => {
+-    if (it.kind !== "skill") return it
+-    const unsupportedRelevantSkill = kb.length > 0 && it.verdict === "relevant" && !hasRoleSupport(it)
+-    const missingCoreSkill = missingNames.length > 0 && !isCore(it)
+-    if (!unsupportedRelevantSkill && !missingCoreSkill) return it
+-    const names = listOf(missingNames.slice(0, 3))
++  const names3 = listOf(missingNames.slice(0, 3))
++  const swapFix = () => {
+     const ideas = ideasFor()
+-    return {
+-      ...it,
+-      verdict: it.verdict === "relevant" ? "weak" : it.verdict,
+-      issue: unsupportedRelevantSkill
+-        ? `This skill does not map to a skill in the knowledge base for ${roleLabel}.`
+-        : it.verdict === "relevant"
+-          ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names}.`
+-          : it.issue,
+-      solution: ideas
+-        ? `Consider listing ${ideas} here instead, if you have used them.`
+-        : missingNames.length
+-          ? "Consider making room for a core skill in place of it."
+-          : "Consider using this space for a role-related skill from the knowledge base that you have used.",
++    return ideas ? `Try listing ${ideas} here instead, if you have used them.` : "Swap it for a skill the role asks for."
++  }
++  const clean = (it: Item): Item => ({ ...it, verdict: "relevant", issue: null, solution: null })
++
++  // Skills. Soft skills and core skills are left alone and skills unrelated to security and IT are red.
++  // For the rest, one flagged skill per core skill the section lacks: the ones with no use in the role
++  // first, then the security skills the role does not rely on. The others are fine to keep.
++  const swapOrder: Record<string, number> = { offrole: 0, adjacent: 1 }
++  const flagged = new Set(
++    parsed.items
++      .map((it, order) => ({ it, order }))
++      .filter((x) => x.it.kind === "skill" && (x.it.fit === "offrole" || x.it.fit === "adjacent"))
++      .sort((a, b) => swapOrder[a.it.fit!] - swapOrder[b.it.fit!] || a.order - b.order)
++      .slice(0, missingNames.length)
++      .map((x) => x.it),
++  )
++
++  const items0: Item[] = parsed.items.map((it) => {
++    const what = it.excerpt ?? "This skill"
++    if (it.kind === "skill") {
++      if (it.fit === "soft" || it.fit === "core") return clean(it)
++      if (it.fit === "unrelated") {
++        return { ...it, verdict: "irrelevant", issue: `${what} has nothing to do with security or IT work.`, solution: swapFix() }
++      }
++      if (it.fit === "offrole" || it.fit === "adjacent") {
++        if (!flagged.has(it)) return clean(it)
++        return {
++          ...it,
++          verdict: "weak",
++          issue: it.fit === "offrole"
++            ? `${what} is not something ${roleLabel} uses day to day, and your skills section does not yet show ${names3}.`
++            : `${what} is a security skill, but not one ${roleLabel} relies on, and your skills section does not yet show ${names3}.`,
++          solution: swapFix(),
++        }
++      }
++      // No fit given by the model: a skill that supports no must-have or strongly preferred item is
++      // weak while core skills are absent.
++      if (!missingNames.length || isCore(it)) return it
++      return {
++        ...it,
++        verdict: it.verdict === "relevant" ? "weak" : it.verdict,
++        issue: it.verdict === "relevant" ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names3}.` : it.issue,
++        solution: swapFix(),
++      }
+     }
++    // Experience and projects: only clear evidence of the role's work can be green.
++    if ((it.kind === "experience" || it.kind === "project") && it.roleWork && it.roleWork !== "clear") {
++      const thin = it.roleWork === "thin"
++      const own = it.verdict !== "relevant"
++      return {
++        ...it,
++        verdict: it.verdict === "irrelevant" ? "irrelevant" : "weak",
++        issue: (own && it.issue) || (thin
++          ? `This touches on work ${roleLabel} does day to day, but does not give enough evidence.`
++          : `This does not show work ${roleLabel} does day to day.`),
++        solution: (own && it.solution) || (thin
++          ? "Name the tool you used, what you did and what came out of it."
++          : "Add a bullet about related hands-on work, if you have done any."),
++      }
++    }
++    return it
+   })
+ 
+   const make = (
+@@ -268,21 +327,39 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+     }
+   }
+ 
+-  // 4. Experience and projects: at least one entry of each should show work the role does day
+-  // to day. Skipped when the model gave no answer for any entry of that kind.
+-  const stillNeeded = (summary?.items ?? []).filter((m) => m.status !== "present").map((m) => shortLabel(m.label))
+-  const examples = (stillNeeded.length ? stillNeeded : kb.filter((k) => k.tier === "MH").map((k) => shortLabel(k.label))).slice(0, 2)
++  // 4. Section checks. Skills: the core skills the section lacks. Experience and projects: at least one
++  // entry should show the role's day-to-day work with enough evidence. Skipped when the model gave no
++  // answer for any entry of that kind.
++  const skillItems = items0.filter((i) => i.kind === "skill")
++  if (skillItems.length && missingNames.length) {
++    all.push({
++      ...make({
++        section: skillItems[0].section,
++        excerpt: null,
++        issue: `Your skills section does not yet show ${names3}.`,
++        solution: "Add the ones you have used, and let the least relevant skills make way if you are short of room.",
++        kbItem: null,
++        kind: "weak",
++      }, "orange"),
++      basis: null,
++    })
++  }
++  const idea = parsed.handsOnIdeas[0]
+   for (const [kind, noun] of [["experience", "experience entries"], ["project", "projects"]] as const) {
+     const group = items0.filter((i) => i.kind === kind)
+-    if (!group.length || !group.some((i) => i.roleWork !== null) || group.some((i) => i.roleWork === true)) continue
++    if (!group.length || !group.some((i) => i.roleWork !== null) || group.some((i) => i.roleWork === "clear")) continue
++    const anyThin = group.some((i) => i.roleWork === "thin")
++    const how = kind === "experience"
++      ? `Add a bullet that names the tool, what you did and the result. If you have no such work yet, a documented lab can show it${idea ? `. For example: ${idea}.` : "."}`
++      : `Add one project that shows this work${idea ? `. For example: ${idea}.` : "."}`
+     all.push({
+       ...make({
+         section: group[0].section,
+         excerpt: null,
+-        issue: `None of your ${noun} show work that ${roleLabel} does day to day.`,
+-        solution: examples.length
+-          ? `Consider adding or rewording one entry so it shows ${listOf(examples).toLowerCase()}.`
+-          : "Consider adding or rewording one entry so it shows the day-to-day work of the role.",
++        issue: anyThin
++          ? `Your ${noun} touch on work ${roleLabel} does day to day, but none shows it with enough evidence.`
++          : `None of your ${noun} show work that ${roleLabel} does day to day.`,
++        solution: how,
+         kbItem: null,
+         kind: "weak",
+       }, "orange"),
+@@ -303,8 +380,8 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+         excerpt: null,
+         issue: "All of your certifications are at the foundational level.",
+         solution: next.length
+-          ? `Consider adding ${listOf(next)} next, as a step beyond the foundational level.`
+-          : `Consider adding one certification aimed at the work of ${roleLabel}, as a step beyond the foundational level.`,
++          ? `Add ${listOf(next)} next, as a step beyond the foundational level.`
++          : `Add one certification aimed at the work of ${roleLabel}, as a step beyond the foundational level.`,
+         kbItem: null,
+         kind: "weak",
+       }, "orange")
+@@ -313,8 +390,8 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+         excerpt: null,
+         issue: `None of your certifications relate to the work of ${roleLabel}.`,
+         solution: next.length
+-          ? `Consider starting with ${listOf(next)}.`
+-          : "Consider starting with an entry-level security certification.",
++          ? `Start with ${listOf(next)}.`
++          : "Start with an entry-level security certification.",
+         kbItem: null,
+         kind: "missing",
+       }, "red"))
+@@ -332,10 +409,11 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+     .map((x) => x.final)
+ 
+   const position = new Map(issues.map((issue, index) => [issue, index]))
+-  const items: FinalItem[] = items0.map((it) => {
++  const items: FinalItem[] = items0.map((it, n) => {
+     const issue = issueOf.get(it)
+     return {
+       ...it,
++      grade: gradeOf(parsed.items[n], it),
+       kbItems: it.kbItems.filter((id) => byId.has(id)),
+       color: itemColor(it),
+       issueIndex: issue ? (position.get(issue) ?? null) : null,
+@@ -359,7 +437,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+     if (suggestions.length === 6) break
+   }
+ 
+-  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, skillIdeas: _si, ...rest } = parsed
++  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, skillIdeas: _si, handsOnIdeas: _h, ...rest } = parsed
+   return {
+     ...rest,
+     suggestions,
+diff --git a/supabase/functions/analyze-resume/kb_test.ts b/supabase/functions/analyze-resume/kb_test.ts
+index 722682f..a8798e8 100644
+--- a/supabase/functions/analyze-resume/kb_test.ts
++++ b/supabase/functions/analyze-resume/kb_test.ts
+@@ -1,5 +1,5 @@
+ // Run: deno test kb_test.ts
+-import { buildMustHaveSummary, finalizeFeedback, issueColor, parseKnowledgeBase, priorityFor } from "./kb.ts"
++import { buildMustHaveSummary, finalizeFeedback, gradeOf, issueColor, parseKnowledgeBase, priorityFor } from "./kb.ts"
+ import type { Feedback, Item } from "./llm.ts"
+ 
+ const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
+@@ -47,7 +47,7 @@ Deno.test("no must-haves in the knowledge base -> no summary", () => {
+ })
+ 
+ const base = (issues: Feedback["issues"], mustHaves: Feedback["mustHaves"] = []): Feedback =>
+-  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [], nextCerts: [], skillIdeas: [] })
++  ({ strengths: ["a"], gaps: ["g"], suggestions: ["s"], vagueBullets: [], issues, mustHaves, items: [], skillsMissing: [], nextCerts: [], skillIdeas: [], handsOnIdeas: [] })
+ const issue = (kbItem: string | null, section = "S") => ({ section, excerpt: null, issue: "i", solution: "s", kbItem })
+ 
+ Deno.test("issues get source label and priority, sorted high to low", () => {
+@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
+ // ---------- verdicts, colors and issues built in code ----------
+ 
+ const item = (over: Partial<Item>): Item =>
+-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], roleWork: null, certLevel: null, issue: null, solution: null, ...over })
++  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, certLevel: null, issue: null, solution: null, ...over })
+ const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
+   ({ ...base(issues, mustHaves), items })
+ 
+@@ -101,19 +101,6 @@ Deno.test("every weak or irrelevant item becomes an issue, relevant items turn g
+   assert(out.colorCounts.red === 1 && out.colorCounts.orange === 1 && out.colorCounts.green === 1, "counts")
+ })
+ 
+-Deno.test("a relevant skill without role knowledge-base support cannot be green", () => {
+-  const kb = parseKnowledgeBase(KB)
+-  const out = finalizeFeedback(withItems([
+-    item({ excerpt: "HTML", verdict: "relevant", kbItems: [] }),
+-    item({ excerpt: "CSS", verdict: "relevant", kbItems: ["PA1"] }),
+-    item({ excerpt: "Splunk", verdict: "relevant", kbItems: ["MH1"] }),
+-  ]), kb, "SOC Analyst")
+-
+-  assert(out.items.map((it) => it.color).join() === "orange,orange,green", "only a role-supported skill is green")
+-  assert(out.issues.some((issue) => issue.excerpt === "HTML" && issue.issue.includes("does not map")), "unsupported skill explains why it is weak")
+-  assert(out.issues.some((issue) => issue.excerpt === "CSS" && issue.issue.includes("does not map")), "practitioner-only signals do not validate a skill")
+-})
+-
+ Deno.test("a missing must-have gets a red issue even if the model raised none", () => {
+   const kb = parseKnowledgeBase(KB)
+   const out = finalizeFeedback(withItems([], [
+@@ -197,22 +184,21 @@ Deno.test("core skills missing: a non-core skill turns weak and the fix names th
+   assert(out.skillsMissing.map((m) => m.id).join() === "SP1,NH3", "valid ids only, no PA, no repeats: " + out.skillsMissing.map((m) => m.id).join())
+   assert(out.items.map((i) => i.color).join() === "green,orange,orange,green", "colors: " + out.items.map((i) => i.color).join())
+   const pe = out.issues.find((i) => i.excerpt === "Prompt Engineering")!
+-  assert(pe.color === "orange" && pe.issue.includes("SOC Analyst") && pe.solution === "Consider listing Security tools or Hands-on practice here instead, if you have used them.", "text: " + pe.solution)
++  assert(pe.color === "orange" && pe.issue.includes("SOC Analyst") && pe.solution === "Try listing Security tools or Hands-on practice here instead, if you have used them.", "text: " + pe.solution)
+   assert(out.issues.find((i) => i.excerpt === "SIEM") === undefined, "core skill untouched")
+ })
+ 
+-Deno.test("a skill without a role knowledge-base match is weak even when core skills are covered", () => {
++Deno.test("no core skills missing: non-core skills are left as the model judged them", () => {
+   const out = finalizeFeedback(withItems([item({ excerpt: "Prompt Engineering", kbItems: [] })]), parseKnowledgeBase(KB))
+-  assert(out.items[0].color === "orange" && out.issues.length === 1, "unsupported skill is not green")
+-  assert(out.issues[0].issue.includes("does not map") && out.issues[0].solution.includes("role-related skill"), "actionable explanation")
++  assert(out.items[0].color === "green" && out.issues.length === 0, "unchanged")
+ })
+ 
+ Deno.test("no project shows the role's work: one orange issue on the section, naming what is still needed", () => {
+   const kb = parseKnowledgeBase(KB)
+   const out = finalizeFeedback(withItems([
+-    item({ section: "PROJECTS", kind: "project", excerpt: "a", roleWork: false }),
+-    item({ section: "PROJECTS", kind: "project", excerpt: "b", roleWork: false }),
+-    item({ section: "EXPERIENCE", kind: "experience", excerpt: "c", roleWork: true }),
++    item({ section: "PROJECTS", kind: "project", excerpt: "a", roleWork: "none" }),
++    item({ section: "PROJECTS", kind: "project", excerpt: "b", roleWork: "none" }),
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "c", roleWork: "clear" }),
+   ], [
+     { id: "MH1", status: "present", evidence: "x" },
+     { id: "MH2", status: "partial", evidence: "y" },
+@@ -221,7 +207,7 @@ Deno.test("no project shows the role's work: one orange issue on the section, na
+   const sec = out.issues.filter((i) => i.excerpt === null && i.section === "PROJECTS")
+   assert(sec.length === 1 && sec[0].color === "orange" && sec[0].basis === null, "one section issue")
+   assert(sec[0].issue === "None of your projects show work that SOC Analyst does day to day.", sec[0].issue)
+-  assert(sec[0].solution.includes("alert triage") && sec[0].solution.includes("core security concepts"), "names still-needed must-haves: " + sec[0].solution)
++  assert(sec[0].solution === "Add one project that shows this work.", "no idea given: " + sec[0].solution)
+   assert(!out.issues.some((i) => i.section === "EXPERIENCE" && i.excerpt === null && i.issue.startsWith("None of")), "experience has role work")
+ })
+ 
+@@ -238,8 +224,8 @@ Deno.test("overall level: strong marks item issues minor and sorts them last, lo
+   const good = Array.from({ length: 8 }, (_, n) => item({ excerpt: "g" + n, kbItems: ["MH1"] }))
+   const strong = finalizeFeedback(withItems([
+     ...good,
+-    item({ section: "EXPERIENCE", kind: "experience", excerpt: "intern", roleWork: true }),
+-    item({ section: "PROJECTS", kind: "project", excerpt: "off", verdict: "weak", issue: "off topic", solution: "reword", roleWork: false }),
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "intern", roleWork: "clear" }),
++    item({ section: "PROJECTS", kind: "project", excerpt: "off", verdict: "weak", issue: "off topic", solution: "reword", roleWork: "none" }),
+   ], must, [{ section: "S", excerpt: "x", issue: "model issue", solution: "fix", kbItem: null, kind: "weak" }]), kb)
+   assert(strong.overall!.level === "strong" && strong.overall!.note.startsWith("Strong fit: 3 of 3 must-haves shown"), "strong: " + strong.overall!.note)
+   const off = strong.issues.find((i) => i.excerpt === "off")!
+@@ -252,7 +238,7 @@ Deno.test("overall level: strong marks item issues minor and sorts them last, lo
+   ], [{ id: "MH1", status: "missing", evidence: null }, { id: "MH2", status: "missing", evidence: null }, { id: "MH3", status: "missing", evidence: null }]), kb)
+   assert(low.overall!.level === "low" && low.issues.every((i) => !i.minor), "low: no minor flags")
+   assert(finalizeFeedback(base([], []), kb).overall === null, "no items, no overall")
+-  const mid = finalizeFeedback(withItems([item({ excerpt: "a", kbItems: ["MH1"] }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
++  const mid = finalizeFeedback(withItems([item({ excerpt: "a" }), item({ excerpt: "b", verdict: "weak", issue: "i", solution: "s" })],
+     [{ id: "MH1", status: "present", evidence: "a" }, { id: "MH2", status: "partial", evidence: "b" }, { id: "MH3", status: "present", evidence: "c" }]), kb)
+   assert(mid.overall!.level === "moderate", "moderate: " + mid.overall!.level)
+ })
+@@ -294,7 +280,7 @@ Deno.test("certification section: all foundational is orange with next steps, no
+   const a = finalizeFeedback(foundational, kb, "SOC Analyst")
+   const sec = a.issues.find((i) => i.excerpt === null && i.section === "CERTIFICATIONS")!
+   assert(sec.color === "orange" && sec.issue === "All of your certifications are at the foundational level.", "orange")
+-  assert(sec.solution === "Consider adding CySA+ and SC-200 next, as a step beyond the foundational level.", sec.solution)
++  assert(sec.solution === "Add CySA+ and SC-200 next, as a step beyond the foundational level.", sec.solution)
+ 
+   const none = finalizeFeedback(withItems([cert("CSS Mastery", "unrelated", "irrelevant")]), kb, "SOC Analyst")
+   const red = none.issues.find((i) => i.excerpt === null)!
+@@ -318,14 +304,14 @@ Deno.test("each weak skill gets its own ideas from the shared list", () => {
+   parsed.skillIdeas = ["Linux", "Python", "Splunk SPL", "EDR", "Sysmon"]
+   const out = finalizeFeedback(parsed, kb)
+   const fix = (e: string) => out.issues.find((i) => i.excerpt === e)!.solution
+-  assert(fix("HTML") === "Consider listing Linux or Python here instead, if you have used them.", fix("HTML"))
+-  assert(fix("CSS") === "Consider listing Splunk SPL or EDR here instead, if you have used them.", fix("CSS"))
+-  assert(fix("Excel") === "Consider listing Sysmon or Linux here instead, if you have used them.", fix("Excel") + " (wraps around)")
++  assert(fix("HTML") === "Try listing Linux or Python here instead, if you have used them.", fix("HTML"))
++  assert(fix("CSS") === "Try listing Splunk SPL or EDR here instead, if you have used them.", fix("CSS"))
++  assert(fix("Excel") === "Try listing Sysmon or Linux here instead, if you have used them.", fix("Excel") + " (wraps around)")
+   assert(!out.issues.some((i) => i.excerpt === "SIEM"), "core skill untouched")
+   // without ideas, the knowledge base item names are used instead
+   const plain = withItems([item({ excerpt: "HTML", kbItems: [], verdict: "weak", issue: "adjacent", solution: "x" })])
+   plain.skillsMissing = ["SP1"]
+-  assert(finalizeFeedback(plain, kb).issues[0].solution === "Consider listing Security tools here instead, if you have used them.", "fallback to item names")
++  assert(finalizeFeedback(plain, kb).issues[0].solution === "Try listing Security tools here instead, if you have used them.", "fallback to item names")
+ })
+ 
+ Deno.test("a partial must-have gets its own issue even when another issue points at the same item", () => {
+@@ -341,3 +327,114 @@ Deno.test("a partial must-have gets its own issue even when another issue points
+     [{ section: "SKILLS", excerpt: null, issue: "no SIEM", solution: "add", kbItem: "MH1", kind: "weak" }]), kb)
+   assert(covered.issues.filter((i) => i.kbItem === "MH1").length === 1, "no duplicate section-level issue")
+ })
++
++// ---------- skills by fit, evidence levels, section fixes ----------
++
++const skill = (excerpt: string, fit: Item["fit"]) => item({ excerpt, fit, kind: "skill", verdict: "relevant" })
++
++Deno.test("skills: one flagged per missing core skill, unrelated to the role first, soft skills untouched", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([
++    skill("SIEM", "core"), skill("Teamwork", "soft"), skill("Kali Linux", "adjacent"), skill("GDPR", "adjacent"),
++    skill("HTML", "offrole"), skill("MySQL", "offrole"), skill("PowerPoint", "unrelated"),
++  ])
++  parsed.skillsMissing = ["MH1", "SP1"]
++  parsed.skillIdeas = ["Linux", "Python", "Splunk SPL"]
++  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
++  const color = (e: string) => out.items.find((i) => i.excerpt === e)!.color
++  assert(color("PowerPoint") === "red", "unrelated is red")
++  assert(color("HTML") === "orange" && color("MySQL") === "orange", "the two missing skills flag the two off-role skills first")
++  assert(color("Kali Linux") === "green" && color("GDPR") === "green", "security skills stay green while off-role skills can make room")
++  assert(color("SIEM") === "green" && color("Teamwork") === "green", "core and soft skills untouched")
++  const html = out.issues.find((i) => i.excerpt === "HTML")!
++  assert(html.issue.startsWith("HTML is not something SOC Analyst uses day to day"), html.issue)
++  assert(html.solution === "Try listing Linux or Python here instead, if you have used them.", html.solution)
++  assert(out.issues.find((i) => i.excerpt === "MySQL")!.solution !== html.solution, "each skill gets different ideas")
++  const sec = out.issues.find((i) => i.excerpt === null && i.section === "SKILLS")!
++  assert(sec.color === "orange" && sec.issue.startsWith("Your skills section does not yet show"), "section-level issue")
++})
++
++Deno.test("skills: when off-role skills run out, security skills are flagged; nothing missing means nothing flagged", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([skill("Kali Linux", "adjacent"), skill("GDPR", "adjacent"), skill("HTML", "offrole")])
++  parsed.skillsMissing = ["MH1", "SP1"]
++  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
++  const color = (e: string) => out.items.find((i) => i.excerpt === e)!.color
++  assert(color("HTML") === "orange" && color("Kali Linux") === "orange" && color("GDPR") === "green", "off-role first, then the first security skill")
++  assert(out.issues.find((i) => i.excerpt === "Kali Linux")!.issue.includes("is a security skill, but not one SOC Analyst relies on"), "reason names why")
++  const none = withItems([skill("Kali Linux", "adjacent"), skill("HTML", "offrole")])
++  const clean = finalizeFeedback(none, kb)
++  assert(clean.issues.length === 0 && clean.items.every((i) => i.color === "green"), "no missing core skills: left alone")
++})
++
++Deno.test("experience and projects: only clear evidence is green; thin and none are orange with their own reason", () => {
++  const kb = parseKnowledgeBase(KB)
++  const exp = (excerpt: string, roleWork: Item["roleWork"], verdict: Item["verdict"] = "relevant", issue: string | null = null) =>
++    item({ section: "EXPERIENCE", kind: "experience", excerpt, roleWork, verdict, issue, solution: issue ? "model fix" : null })
++  const out = finalizeFeedback(withItems([
++    exp("triaged 40 alerts in QRadar", "clear"),
++    exp("log monitoring", "thin"),
++    exp("wrote security reports", "none"),
++    exp("fixed the printer", "none", "weak", "off topic"),
++  ]), kb, "SOC Analyst")
++  assert(out.items.map((i) => i.color).join() === "green,orange,orange,orange", out.items.map((i) => i.color).join())
++  const thin = out.issues.find((i) => i.excerpt === "log monitoring")!
++  assert(thin.issue === "This touches on work SOC Analyst does day to day, but does not give enough evidence." && thin.solution === "Name the tool you used, what you did and what came out of it.", thin.issue)
++  const none = out.issues.find((i) => i.excerpt === "wrote security reports")!
++  assert(none.issue === "This does not show work SOC Analyst does day to day.", none.issue)
++  const own = out.issues.find((i) => i.excerpt === "fixed the printer")!
++  assert(own.issue === "off topic" && own.solution === "model fix", "the model's own reason and fix are kept")
++  assert(!out.issues.some((i) => i.excerpt === null && i.section === "EXPERIENCE"), "one clear entry: no section issue")
++})
++
++Deno.test("section issue for experience and projects names the evidence gap and a hands-on idea", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "a", roleWork: "thin" }),
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "b", roleWork: "none" }),
++    item({ section: "PROJECTS", kind: "project", excerpt: "c", roleWork: "none" }),
++  ])
++  parsed.handsOnIdeas = ["Triage sample alerts in a free SIEM and write each case up as a ticket-style note"]
++  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
++  const e = out.issues.find((i) => i.excerpt === null && i.section === "EXPERIENCE")!
++  assert(e.issue === "Your experience entries touch on work SOC Analyst does day to day, but none shows it with enough evidence.", e.issue)
++  assert(e.solution.startsWith("Add a bullet that names the tool") && e.solution.endsWith("For example: Triage sample alerts in a free SIEM and write each case up as a ticket-style note."), e.solution)
++  const p = out.issues.find((i) => i.excerpt === null && i.section === "PROJECTS")!
++  assert(p.issue === "None of your projects show work that SOC Analyst does day to day." && p.solution.startsWith("Add one project that shows this work. For example:"), p.solution)
++  assert(!/^Consider/.test(e.solution) && !/^Consider/.test(p.solution), "no repeated opener")
++})
++
++// ---------- grade: the same three levels in every section ----------
++
++Deno.test("grade: core, thin or irrelevant for every kind of item", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([
++    item({ excerpt: "SIEM", kind: "skill", fit: "core" }),
++    item({ excerpt: "Teamwork", kind: "skill", fit: "soft" }),
++    item({ excerpt: "Kali", kind: "skill", fit: "adjacent" }),
++    item({ excerpt: "HTML", kind: "skill", fit: "offrole" }),
++    item({ excerpt: "PowerPoint", kind: "skill", fit: "unrelated", verdict: "irrelevant", issue: "i", solution: "s" }),
++    item({ excerpt: "SC-200", kind: "certification", certLevel: "role" }),
++    item({ excerpt: "Google", kind: "certification", certLevel: "foundational" }),
++    item({ excerpt: "CSS course", kind: "certification", certLevel: "unrelated", verdict: "irrelevant", issue: "i", solution: "s" }),
++    item({ excerpt: "triaged alerts in QRadar", kind: "experience", roleWork: "clear" }),
++    item({ excerpt: "log monitoring", kind: "experience", roleWork: "thin" }),
++    item({ excerpt: "wrote reports", kind: "project", roleWork: "none" }),
++    item({ excerpt: "waited tables", kind: "experience", roleWork: "none", verdict: "irrelevant", issue: "i", solution: "s" }),
++    item({ excerpt: "B.Tech Cybersecurity", kind: "education", verdict: "relevant" }),
++    item({ excerpt: "unlabelled weak", kind: "other", verdict: "weak", issue: "i", solution: "s" }),
++  ])
++  parsed.skillsMissing = ["MH1"] // one core skill missing: only the first off-role skill is flagged
++  const out = finalizeFeedback(parsed, kb)
++  const grade = (e: string) => out.items.find((i) => i.excerpt === e)!.grade
++  const expected: Record<string, string> = {
++    SIEM: "core", Teamwork: "core", Kali: "thin", HTML: "thin", PowerPoint: "irrelevant",
++    "SC-200": "core", Google: "thin", "CSS course": "irrelevant",
++    "triaged alerts in QRadar": "core", "log monitoring": "thin", "wrote reports": "thin", "waited tables": "irrelevant",
++    "B.Tech Cybersecurity": "core", "unlabelled weak": "thin",
++  }
++  for (const [e, g] of Object.entries(expected)) assert(grade(e) === g, `${e}: expected ${g}, got ${grade(e)}`)
++  // grade describes the item, not whether it was flagged for room: unflagged adjacent skills are still thin
++  assert(out.items.find((i) => i.excerpt === "Kali")!.color === "green", "Kali is green but still thin")
++  assert(gradeOf(item({ kind: "experience", roleWork: "clear", verdict: "relevant" }), item({ kind: "experience", verdict: "weak" })) === "thin", "clear evidence the model still flagged is thin")
++})
+diff --git a/supabase/functions/analyze-resume/llm.ts b/supabase/functions/analyze-resume/llm.ts
+index f1295cf..32ce959 100644
+--- a/supabase/functions/analyze-resume/llm.ts
++++ b/supabase/functions/analyze-resume/llm.ts
+@@ -13,6 +13,10 @@ export type Usage = { inputTokens: number | null; outputTokens: number | null }
+ export type LlmResult = { ok: true; text: string; usage?: Usage } | LlmFail
+ type FetchFn = typeof fetch
+ 
++// core: matches a knowledge base item. adjacent: a security skill the role does not rely on. offrole: an IT, software or
++// professional skill with no use in the role. unrelated: nothing to do with security or IT. soft: a soft skill.
++export type SkillFit = "core" | "adjacent" | "offrole" | "unrelated" | "soft"
++export type RoleWork = "clear" | "thin" | "none"
+ export type ItemVerdict = "relevant" | "weak" | "irrelevant"
+ export type IssueKind = "missing" | "weak" | "error"
+ // One thing on the resume (a skill, a job, a project, a certification...) with a verdict on it.
+@@ -22,7 +26,8 @@ export type Item = {
+   excerpt: string | null
+   verdict: ItemVerdict
+   kbItems: string[]
+-  roleWork: boolean | null // experience and projects only: shows work the role does day to day
++  fit: SkillFit | null // skills only
++  roleWork: RoleWork | null // experience and projects only: clear evidence, thin evidence or none of the role's day-to-day work
+   certLevel: "role" | "foundational" | "unrelated" | null // certifications only
+   issue: string | null
+   solution: string | null
+@@ -37,6 +42,7 @@ export type Feedback = {
+   skillsMissing: string[] // knowledge base item ids a strong skills section would show but this one lacks
+   nextCerts: string[] // up to 3 certifications from the knowledge base that are the next step
+   skillIdeas: string[] // up to 8 short skill names a candidate could list instead of a weak skill
++  handsOnIdeas: string[] // up to 3 hands-on project or lab ideas taken from the knowledge base
+   mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
+   vagueBullets: { original: string; suggestion: string }[]
+ }
+@@ -202,6 +208,25 @@ export type RunResult =
+   | { ok: true; text: string; provider: string; model: string; tried: string[]; usage?: Usage }
+   | { ok: false; reason: string; detail: string; tried: string[] }
+ 
++export type AttemptConfig = {
++  provider: string          // first choice: "gemini" or "claude"
++  fallback: string          // second choice: "gemini", "claude" or "none"
++  geminiKey: string
++  geminiModels: string[]
++  anthropicKey: string
++  claudeModels: string[]    // tried in order, each with its own retries
++}
++
++// Builds the ordered list of things to try. A provider without a key is skipped.
++export function planAttempts(c: AttemptConfig): Attempt[] {
++  const gemini = (): Attempt[] =>
++    c.geminiKey ? c.geminiModels.map((model) => ({ provider: "gemini" as const, model, apiKey: c.geminiKey, tries: 2 })) : []
++  const claude = (): Attempt[] =>
++    c.anthropicKey ? c.claudeModels.map((model) => ({ provider: "claude" as const, model, apiKey: c.anthropicKey, tries: 2 })) : []
++  const order = [c.provider, ...(c.fallback !== "none" && c.fallback !== c.provider ? [c.fallback] : [])]
++  return order.flatMap((p) => (p === "gemini" ? gemini() : p === "claude" ? claude() : []))
++}
++
+ // Tries each option in order. A temporary failure (busy, rate limit, timeout, empty or unusable
+ // answer) is retried with a growing pause, then the next option is used. A permanent failure
+ // (wrong model name, bad key) skips straight to the next option. Total time stays under the
+@@ -258,6 +283,8 @@ const firstOfEach = (list: string[]): string[] => {
+ 
+ const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
+ const ISSUE_KINDS = new Set(["missing", "weak", "error"])
++const FITS = new Set(["core", "adjacent", "offrole", "unrelated", "soft"])
++const ROLE_WORK = new Set(["clear", "thin", "none"])
+ const CERT_LEVELS = new Set(["role", "foundational", "unrelated"])
+ const ITEM_KINDS = new Set(["skill", "experience", "project", "certification", "education", "other"])
+ const cleanStr = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
+@@ -317,7 +344,8 @@ export function parseFeedback(text: string): Feedback | null {
+           excerpt: cleanStr(it.excerpt),
+           verdict,
+           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
+-          roleWork: typeof it.roleWork === "boolean" ? it.roleWork : null,
++          fit: FITS.has(String(it.fit).trim().toLowerCase()) ? (String(it.fit).trim().toLowerCase() as SkillFit) : null,
++          roleWork: ROLE_WORK.has(String(it.roleWork).trim().toLowerCase()) ? (String(it.roleWork).trim().toLowerCase() as RoleWork) : null,
+           certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
+           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
+           solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
+@@ -326,6 +354,7 @@ export function parseFeedback(text: string): Feedback | null {
+     skillsMissing: strList(raw.skillsMissing).map((x) => x.toUpperCase()),
+     nextCerts: strList(raw.nextCerts).slice(0, 3),
+     skillIdeas: firstOfEach(strList(raw.skillIdeas)).slice(0, 8),
++    handsOnIdeas: firstOfEach(strList(raw.handsOnIdeas)).slice(0, 3),
+     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
+       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
+       .map((m: any) => ({
+diff --git a/supabase/functions/analyze-resume/llm_test.ts b/supabase/functions/analyze-resume/llm_test.ts
+index b65940a..75de61c 100644
+--- a/supabase/functions/analyze-resume/llm_test.ts
++++ b/supabase/functions/analyze-resume/llm_test.ts
+@@ -1,5 +1,5 @@
+ // Run: deno test llm_test.ts   (no network, all provider calls are faked)
+-import { buildGeminiBody, callClaude, callGemini, parseFeedback, runWithFallback, type Attempt, type RunResult } from "./llm.ts"
++import { planAttempts, buildGeminiBody, callClaude, callGemini, parseFeedback, runWithFallback, type Attempt, type RunResult } from "./llm.ts"
+ 
+ const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
+ function mustFail(r: RunResult) { if (r.ok) throw new Error("FAILED: expected a failure"); return r }
+@@ -208,12 +208,12 @@ Deno.test("parseFeedback: roleWork and skillsMissing", () => {
+     strengths: ["a"],
+     skillsMissing: [" nh13 ", "SP3", 4, ""],
+     items: [
+-      { section: "PROJECTS", kind: "project", excerpt: "x", verdict: "weak", roleWork: false },
+-      { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant", roleWork: "yes" },
++      { section: "PROJECTS", kind: "project", excerpt: "x", verdict: "weak", roleWork: "none" },
++      { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant", roleWork: "yes", fit: "Core" },
+     ],
+   }))!
+   assert(out.skillsMissing.join() === "NH13,SP3", "ids cleaned")
+-  assert(out.items[0].roleWork === false && out.items[1].roleWork === null, "roleWork is a boolean or null")
++  assert(out.items[0].roleWork === "none" && out.items[1].roleWork === null && out.items[1].fit === "core" && out.items[0].fit === null, "roleWork and fit are known values or null")
+ })
+ 
+ Deno.test("usage is read from both providers", async () => {
+@@ -250,3 +250,20 @@ Deno.test("parseFeedback: skillIdeas are trimmed, deduplicated and capped at 8",
+   const out = parseFeedback(JSON.stringify({ strengths: ["a"], skillIdeas: [" Linux ", "linux", "Python", "A", "B", "C", "D", "E", "F", "G", ""] }))!
+   assert(out.skillIdeas.length === 8 && out.skillIdeas[0] === "Linux" && out.skillIdeas[1] === "Python", out.skillIdeas.join())
+ })
++
++Deno.test("parseFeedback: handsOnIdeas are capped at 3", () => {
++  const out = parseFeedback(JSON.stringify({ strengths: ["a"], handsOnIdeas: ["one", "ONE", "two", "three", "four"] }))!
++  assert(out.handsOnIdeas.join() === "one,two,three", out.handsOnIdeas.join())
++})
++
++Deno.test("planAttempts: order, several Claude models, missing keys", () => {
++  const base = { provider: "claude", fallback: "none", geminiKey: "g", geminiModels: ["g1", "g2"], anthropicKey: "a", claudeModels: ["c1", "c2"] }
++  const names = (c: Parameters<typeof planAttempts>[0]) => planAttempts(c).map((a) => `${a.provider}/${a.model}`).join()
++  assert(names(base) === "claude/c1,claude/c2", names(base))
++  assert(names({ ...base, fallback: "gemini" }) === "claude/c1,claude/c2,gemini/g1,gemini/g2", "claude first, gemini as backup")
++  assert(names({ ...base, provider: "gemini", fallback: "claude" }) === "gemini/g1,gemini/g2,claude/c1,claude/c2", "gemini first")
++  assert(names({ ...base, fallback: "claude" }) === "claude/c1,claude/c2", "same provider is not repeated")
++  assert(names({ ...base, anthropicKey: "" }) === "", "no key, nothing to try")
++  assert(names({ ...base, anthropicKey: "", fallback: "gemini" }) === "gemini/g1,gemini/g2", "a provider without a key is skipped")
++  assert(planAttempts(base).every((a) => a.tries === 2), "two tries each")
++})

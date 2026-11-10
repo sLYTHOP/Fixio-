@@ -24,11 +24,13 @@ export type ItemColor = IssueColor | "green"
 export type FinalIssue = Feedback["issues"][number] & { basis: string | null; priority: Priority; color: IssueColor; minor: boolean }
 // issueIndex: position of this item's issue in the sorted issues list, so a mark on the resume can open that
 // issue. null for relevant items. red is used for skills and certifications that have nothing to do with the field.
-export type FinalItem = Item & { color: ItemColor; issueIndex: number | null }
+// grade: how much the item helps for this role, the same three levels in every section (the base for scoring).
+export type Grade = "core" | "thin" | "irrelevant"
+export type FinalItem = Item & { color: ItemColor; issueIndex: number | null; grade: Grade }
 export type ColorCounts = { red: number; orange: number; green: number }
 export type OverallLevel = "strong" | "moderate" | "low"
 export type Overall = { level: OverallLevel; note: string }
-export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing" | "skillIdeas"> & {
+export type FinalFeedback = Omit<Feedback, "issues" | "mustHaves" | "items" | "skillsMissing" | "skillIdeas" | "handsOnIdeas"> & {
   issues: FinalIssue[]
   items: FinalItem[]
   colorCounts: ColorCounts
@@ -95,6 +97,25 @@ const listOf = (names: string[]) =>
 const itemColor = (it: Item): ItemColor =>
   it.verdict === "relevant" ? "green" : it.verdict === "irrelevant" && (it.kind === "skill" || it.kind === "certification") ? "red" : "orange"
 
+// The same three levels for every kind of item, computed from the labels the model gave and the final verdict.
+// Skills: core and soft count as core; adjacent and off-role skills are thin. Certifications: role-level is core,
+// foundational is thin. Experience and projects: only clear evidence is core. Anything unrelated to security
+// and IT is irrelevant. When the model gave no label, the verdict decides.
+export function gradeOf(original: Item, final: Item): Grade {
+  const byVerdict = (): Grade => (final.verdict === "relevant" ? "core" : final.verdict === "weak" ? "thin" : "irrelevant")
+  if (final.verdict === "irrelevant") return "irrelevant"
+  if (original.kind === "skill" && original.fit) {
+    return original.fit === "unrelated" ? "irrelevant" : original.fit === "core" || original.fit === "soft" ? "core" : "thin"
+  }
+  if (original.kind === "certification" && original.certLevel) {
+    return original.certLevel === "unrelated" ? "irrelevant" : original.certLevel === "role" ? "core" : "thin"
+  }
+  if ((original.kind === "experience" || original.kind === "project") && original.roleWork) {
+    return original.roleWork === "clear" && final.verdict === "relevant" ? "core" : "thin"
+  }
+  return byVerdict()
+}
+
 // Red for errors and for a must-have that is missing. Everything else is weak: orange.
 export function issueColor(kind: IssueKind | null | undefined, excerpt: string | null, tier: Tier | null): IssueColor {
   if (kind === "error") return "red"
@@ -108,7 +129,7 @@ export function overallFor(items: Item[], summary: MustHaveSummary | null): Over
   if (!items.length) return null
   const share = items.filter((i) => i.verdict === "relevant").length / items.length
   const coverage = summary && summary.total ? summary.shown / summary.total : null
-  const hasRoleWork = items.some((i) => i.roleWork === true)
+  const hasRoleWork = items.some((i) => i.roleWork === "clear")
   const anyRoleWorkInfo = items.some((i) => i.roleWork !== null)
   const counts = summary ? `${summary.shown} of ${summary.total} must-haves shown` : null
   if ((coverage !== null && coverage < 0.5) || share < 0.4) {
@@ -138,14 +159,9 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     const k = byId.get(id)
     return !!k && (k.tier === "MH" || k.tier === "SP")
   })
-  const hasRoleSupport = (it: Item) => it.kbItems.some((id) => {
-    const k = byId.get(id)
-    return !!k && k.tier !== "PA"
-  })
 
-  // A relevant skill needs a non-practitioner knowledge-base match. When core skills are also
-  // absent, non-core skills are weak because they take space the missing skills could use.
-  // Each flagged skill gets its own two ideas from a shared list.
+  // Ideas for what to list instead of a weak skill. Each flagged skill takes the next two from a shared
+  // list, so neighbouring skills do not all get the same advice.
   const pool = parsed.skillIdeas.length ? parsed.skillIdeas : missingNames
   let next = 0
   const ideasFor = (): string => {
@@ -155,27 +171,70 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     next += 2
     return listOf(picked).replace(" and ", " or ")
   }
-  const items0: Item[] = parsed.items.map((it) => {
-    if (it.kind !== "skill") return it
-    const unsupportedRelevantSkill = kb.length > 0 && it.verdict === "relevant" && !hasRoleSupport(it)
-    const missingCoreSkill = missingNames.length > 0 && !isCore(it)
-    if (!unsupportedRelevantSkill && !missingCoreSkill) return it
-    const names = listOf(missingNames.slice(0, 3))
+  const names3 = listOf(missingNames.slice(0, 3))
+  const swapFix = () => {
     const ideas = ideasFor()
-    return {
-      ...it,
-      verdict: it.verdict === "relevant" ? "weak" : it.verdict,
-      issue: unsupportedRelevantSkill
-        ? `This skill does not map to a skill in the knowledge base for ${roleLabel}.`
-        : it.verdict === "relevant"
-          ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names}.`
-          : it.issue,
-      solution: ideas
-        ? `Consider listing ${ideas} here instead, if you have used them.`
-        : missingNames.length
-          ? "Consider making room for a core skill in place of it."
-          : "Consider using this space for a role-related skill from the knowledge base that you have used.",
+    return ideas ? `Try listing ${ideas} here instead, if you have used them.` : "Swap it for a skill the role asks for."
+  }
+  const clean = (it: Item): Item => ({ ...it, verdict: "relevant", issue: null, solution: null })
+
+  // Skills. Soft skills and core skills are left alone and skills unrelated to security and IT are red.
+  // For the rest, one flagged skill per core skill the section lacks: the ones with no use in the role
+  // first, then the security skills the role does not rely on. The others are fine to keep.
+  const swapOrder: Record<string, number> = { offrole: 0, adjacent: 1 }
+  const flagged = new Set(
+    parsed.items
+      .map((it, order) => ({ it, order }))
+      .filter((x) => x.it.kind === "skill" && (x.it.fit === "offrole" || x.it.fit === "adjacent"))
+      .sort((a, b) => swapOrder[a.it.fit!] - swapOrder[b.it.fit!] || a.order - b.order)
+      .slice(0, missingNames.length)
+      .map((x) => x.it),
+  )
+
+  const items0: Item[] = parsed.items.map((it) => {
+    const what = it.excerpt ?? "This skill"
+    if (it.kind === "skill") {
+      if (it.fit === "soft" || it.fit === "core") return clean(it)
+      if (it.fit === "unrelated") {
+        return { ...it, verdict: "irrelevant", issue: `${what} has nothing to do with security or IT work.`, solution: swapFix() }
+      }
+      if (it.fit === "offrole" || it.fit === "adjacent") {
+        if (!flagged.has(it)) return clean(it)
+        return {
+          ...it,
+          verdict: "weak",
+          issue: it.fit === "offrole"
+            ? `${what} is not something ${roleLabel} uses day to day, and your skills section does not yet show ${names3}.`
+            : `${what} is a security skill, but not one ${roleLabel} relies on, and your skills section does not yet show ${names3}.`,
+          solution: swapFix(),
+        }
+      }
+      // No fit given by the model: a skill that supports no must-have or strongly preferred item is
+      // weak while core skills are absent.
+      if (!missingNames.length || isCore(it)) return it
+      return {
+        ...it,
+        verdict: it.verdict === "relevant" ? "weak" : it.verdict,
+        issue: it.verdict === "relevant" ? `This is not a core skill for ${roleLabel}, and your skills section does not yet show ${names3}.` : it.issue,
+        solution: swapFix(),
+      }
     }
+    // Experience and projects: only clear evidence of the role's work can be green.
+    if ((it.kind === "experience" || it.kind === "project") && it.roleWork && it.roleWork !== "clear") {
+      const thin = it.roleWork === "thin"
+      const own = it.verdict !== "relevant"
+      return {
+        ...it,
+        verdict: it.verdict === "irrelevant" ? "irrelevant" : "weak",
+        issue: (own && it.issue) || (thin
+          ? `This touches on work ${roleLabel} does day to day, but does not give enough evidence.`
+          : `This does not show work ${roleLabel} does day to day.`),
+        solution: (own && it.solution) || (thin
+          ? "Name the tool you used, what you did and what came out of it."
+          : "Add a bullet about related hands-on work, if you have done any."),
+      }
+    }
+    return it
   })
 
   const make = (
@@ -268,21 +327,39 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     }
   }
 
-  // 4. Experience and projects: at least one entry of each should show work the role does day
-  // to day. Skipped when the model gave no answer for any entry of that kind.
-  const stillNeeded = (summary?.items ?? []).filter((m) => m.status !== "present").map((m) => shortLabel(m.label))
-  const examples = (stillNeeded.length ? stillNeeded : kb.filter((k) => k.tier === "MH").map((k) => shortLabel(k.label))).slice(0, 2)
+  // 4. Section checks. Skills: the core skills the section lacks. Experience and projects: at least one
+  // entry should show the role's day-to-day work with enough evidence. Skipped when the model gave no
+  // answer for any entry of that kind.
+  const skillItems = items0.filter((i) => i.kind === "skill")
+  if (skillItems.length && missingNames.length) {
+    all.push({
+      ...make({
+        section: skillItems[0].section,
+        excerpt: null,
+        issue: `Your skills section does not yet show ${names3}.`,
+        solution: "Add the ones you have used, and let the least relevant skills make way if you are short of room.",
+        kbItem: null,
+        kind: "weak",
+      }, "orange"),
+      basis: null,
+    })
+  }
+  const idea = parsed.handsOnIdeas[0]
   for (const [kind, noun] of [["experience", "experience entries"], ["project", "projects"]] as const) {
     const group = items0.filter((i) => i.kind === kind)
-    if (!group.length || !group.some((i) => i.roleWork !== null) || group.some((i) => i.roleWork === true)) continue
+    if (!group.length || !group.some((i) => i.roleWork !== null) || group.some((i) => i.roleWork === "clear")) continue
+    const anyThin = group.some((i) => i.roleWork === "thin")
+    const how = kind === "experience"
+      ? `Add a bullet that names the tool, what you did and the result. If you have no such work yet, a documented lab can show it${idea ? `. For example: ${idea}.` : "."}`
+      : `Add one project that shows this work${idea ? `. For example: ${idea}.` : "."}`
     all.push({
       ...make({
         section: group[0].section,
         excerpt: null,
-        issue: `None of your ${noun} show work that ${roleLabel} does day to day.`,
-        solution: examples.length
-          ? `Consider adding or rewording one entry so it shows ${listOf(examples).toLowerCase()}.`
-          : "Consider adding or rewording one entry so it shows the day-to-day work of the role.",
+        issue: anyThin
+          ? `Your ${noun} touch on work ${roleLabel} does day to day, but none shows it with enough evidence.`
+          : `None of your ${noun} show work that ${roleLabel} does day to day.`,
+        solution: how,
         kbItem: null,
         kind: "weak",
       }, "orange"),
@@ -303,8 +380,8 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
         excerpt: null,
         issue: "All of your certifications are at the foundational level.",
         solution: next.length
-          ? `Consider adding ${listOf(next)} next, as a step beyond the foundational level.`
-          : `Consider adding one certification aimed at the work of ${roleLabel}, as a step beyond the foundational level.`,
+          ? `Add ${listOf(next)} next, as a step beyond the foundational level.`
+          : `Add one certification aimed at the work of ${roleLabel}, as a step beyond the foundational level.`,
         kbItem: null,
         kind: "weak",
       }, "orange")
@@ -313,8 +390,8 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
         excerpt: null,
         issue: `None of your certifications relate to the work of ${roleLabel}.`,
         solution: next.length
-          ? `Consider starting with ${listOf(next)}.`
-          : "Consider starting with an entry-level security certification.",
+          ? `Start with ${listOf(next)}.`
+          : "Start with an entry-level security certification.",
         kbItem: null,
         kind: "missing",
       }, "red"))
@@ -332,10 +409,11 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     .map((x) => x.final)
 
   const position = new Map(issues.map((issue, index) => [issue, index]))
-  const items: FinalItem[] = items0.map((it) => {
+  const items: FinalItem[] = items0.map((it, n) => {
     const issue = issueOf.get(it)
     return {
       ...it,
+      grade: gradeOf(parsed.items[n], it),
       kbItems: it.kbItems.filter((id) => byId.has(id)),
       color: itemColor(it),
       issueIndex: issue ? (position.get(issue) ?? null) : null,
@@ -359,7 +437,7 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
     if (suggestions.length === 6) break
   }
 
-  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, skillIdeas: _si, ...rest } = parsed
+  const { mustHaves: _m, issues: _i, items: _it, suggestions: _s, skillsMissing: _sm, skillIdeas: _si, handsOnIdeas: _h, ...rest } = parsed
   return {
     ...rest,
     suggestions,

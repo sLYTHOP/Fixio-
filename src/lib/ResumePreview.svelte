@@ -62,7 +62,7 @@
     return -1
   }
 
-  function findTextMatches(items, query, section = null, sectionHeadings = []) {
+  function findTextMatches(items, query, section = null, sectionHeadings = [], allowGlobalFallback = false) {
     const normalizedQuery = normalizeText(query)
     if (!normalizedQuery) return []
 
@@ -107,11 +107,15 @@
         }
         sectionStart = findWholePhrase(normalizedText, normalizedSection, sectionStart + 1, normalizedText.length)
       }
-      return []
+      if (!allowGlobalFallback) return []
     }
 
     const start = findWholePhrase(normalizedText, normalizedQuery, 0, normalizedText.length)
     if (start < 0) return []
+    if (allowGlobalFallback) {
+      const secondMatch = findWholePhrase(normalizedText, normalizedQuery, start + 1, normalizedText.length)
+      if (secondMatch >= 0) return []
+    }
     return collectTextMatch(positions, start, start + normalizedQuery.length)
   }
 
@@ -260,7 +264,7 @@
     function addTextMarks({ documentTextItems, matches, color, issueIndex, itemIndex }) {
       matches.forEach((match) => {
         const textItem = documentTextItems[match.itemIndex]
-        const textDiv = textItem?.textLayer.textDivs[textItem.textItemIndex]
+        const textDiv = textItem?.textDiv
         if (!textDiv) return
         const rects = getTextRects(textDiv, match.start, match.end)
         rects.forEach((rect) => {
@@ -326,13 +330,16 @@
     }
 
     const documentTextItems = renderedPages.flatMap(({ page, textLayer, pageRect }) =>
-      textLayer.textContentItemsStr.map((text, textItemIndex) => ({
-        text,
-        pageNumber: page.number,
-        textLayer,
-        pageRect,
-        textItemIndex,
-      })),
+      textLayer.textContentItemsStr.map((text, textItemIndex) => {
+        const textDiv = textLayer.textDivs[textItemIndex]
+        return {
+          text: textDiv?.textContent ?? text,
+          textDiv,
+          pageNumber: page.number,
+          pageRect,
+          textItemIndex,
+        }
+      }),
     )
     const sectionHeadings = [...new Set([...items, ...issues].map((entry) => entry.section).filter(Boolean))]
 
@@ -342,6 +349,7 @@
         issue.excerpt || issue.section,
         issue.excerpt ? issue.section : null,
         sectionHeadings,
+        issue.color === 'red' || issue.color === 'orange',
       )
       if (issue.excerpt && matches.length) matchedIssueExcerpts.add(issueIndex)
       addTextMarks({
@@ -382,7 +390,7 @@
         console.warn('[ResumePreview] no PDF text match for issue excerpt', { index, excerpt: issue.excerpt })
       })
       if (issues.some((_, index) => !nextMarks.some((mark) => mark.issueIndex === index))) {
-        highlightWarning = 'Some sections could not be matched to selectable text in this PDF. Every finding and solution is still listed alongside the preview.'
+        highlightWarning = 'Some findings could not be matched to selectable text in the PDF. Red and orange labels use the exact quote when it is unique; findings without a quote point to their section heading. Every finding and suggestion is still listed alongside the preview.'
       } else {
         highlightWarning = ''
       }

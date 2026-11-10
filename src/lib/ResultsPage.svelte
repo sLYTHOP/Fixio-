@@ -75,7 +75,6 @@
     document.getElementById('selected-issue-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
-  $: showColorCounts = reviewColors.every(({ color }) => Number.isFinite(feedback?.colorCounts?.[color]))
   $: overallLabel = ({
     strong: 'Strong fit',
     moderate: 'Partly there',
@@ -572,20 +571,7 @@
               <span>{feedback.overall.note}</span>
             </p>
           {/if}
-          {#if showColorCounts}
-            <h2>Review breakdown</h2>
-            <div class="summary-color-legend" aria-label="Review color counts">
-              {#each reviewColors as { color, label }}
-                <span class="summary-color-count">
-                  <i class="color-dot {color}" aria-hidden="true"></i>
-                  <strong>{feedback.colorCounts[color]}</strong>
-                  <span>{label}</span>
-                </span>
-              {/each}
-            </div>
-          {:else}
-            <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
-          {/if}
+          <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
         </div>
         <div class="summary-strengths">
           <strong>{feedback.strengths.length}</strong>
@@ -852,8 +838,6 @@
     height: 29px;
     display: grid;
     place-items: center;
-    border-radius: 9px;
-    background: var(--lime);
     color: #202126;
   }
 
@@ -1134,27 +1118,6 @@
     font-weight: 700;
   }
 
-  .summary-color-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px 12px;
-  }
-
-  .summary-color-count {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.4;
-  }
-
-  .summary-color-count strong {
-    color: var(--ink);
-    font-size: 11px;
-  }
-
-  .color-dot,
   .issue-color-marker {
     width: 7px;
     height: 7px;
@@ -1162,11 +1125,8 @@
     border-radius: 50%;
   }
 
-  .color-dot.red,
   .issue-color-marker.red { background: #e52323; }
-  .color-dot.orange,
   .issue-color-marker.orange { background: #e98a12; }
-  .color-dot.green,
   .issue-color-marker.green { background: #218a31; }
 
   .summary-strengths {

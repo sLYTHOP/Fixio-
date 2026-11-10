@@ -13,6 +13,10 @@ export type Usage = { inputTokens: number | null; outputTokens: number | null }
 export type LlmResult = { ok: true; text: string; usage?: Usage } | LlmFail
 type FetchFn = typeof fetch
 
+// core: matches a knowledge base item. adjacent: a security skill the role does not rely on. offrole: an IT, software or
+// professional skill with no use in the role. unrelated: nothing to do with security or IT. soft: a soft skill.
+export type SkillFit = "core" | "adjacent" | "offrole" | "unrelated" | "soft"
+export type RoleWork = "clear" | "thin" | "none"
 export type ItemVerdict = "relevant" | "weak" | "irrelevant"
 export type IssueKind = "missing" | "weak" | "error"
 // One thing on the resume (a skill, a job, a project, a certification...) with a verdict on it.
@@ -22,7 +26,8 @@ export type Item = {
   excerpt: string | null
   verdict: ItemVerdict
   kbItems: string[]
-  roleWork: boolean | null // experience and projects only: shows work the role does day to day
+  fit: SkillFit | null // skills only
+  roleWork: RoleWork | null // experience and projects only: clear evidence, thin evidence or none of the role's day-to-day work
   certLevel: "role" | "foundational" | "unrelated" | null // certifications only
   issue: string | null
   solution: string | null
@@ -37,6 +42,7 @@ export type Feedback = {
   skillsMissing: string[] // knowledge base item ids a strong skills section would show but this one lacks
   nextCerts: string[] // up to 3 certifications from the knowledge base that are the next step
   skillIdeas: string[] // up to 8 short skill names a candidate could list instead of a weak skill
+  handsOnIdeas: string[] // up to 3 hands-on project or lab ideas taken from the knowledge base
   mustHaves: { id: string; status: string; evidence: string | null; section?: string | null; solution?: string | null }[]
   vagueBullets: { original: string; suggestion: string }[]
 }
@@ -202,6 +208,25 @@ export type RunResult =
   | { ok: true; text: string; provider: string; model: string; tried: string[]; usage?: Usage }
   | { ok: false; reason: string; detail: string; tried: string[] }
 
+export type AttemptConfig = {
+  provider: string          // first choice: "gemini" or "claude"
+  fallback: string          // second choice: "gemini", "claude" or "none"
+  geminiKey: string
+  geminiModels: string[]
+  anthropicKey: string
+  claudeModels: string[]    // tried in order, each with its own retries
+}
+
+// Builds the ordered list of things to try. A provider without a key is skipped.
+export function planAttempts(c: AttemptConfig): Attempt[] {
+  const gemini = (): Attempt[] =>
+    c.geminiKey ? c.geminiModels.map((model) => ({ provider: "gemini" as const, model, apiKey: c.geminiKey, tries: 2 })) : []
+  const claude = (): Attempt[] =>
+    c.anthropicKey ? c.claudeModels.map((model) => ({ provider: "claude" as const, model, apiKey: c.anthropicKey, tries: 2 })) : []
+  const order = [c.provider, ...(c.fallback !== "none" && c.fallback !== c.provider ? [c.fallback] : [])]
+  return order.flatMap((p) => (p === "gemini" ? gemini() : p === "claude" ? claude() : []))
+}
+
 // Tries each option in order. A temporary failure (busy, rate limit, timeout, empty or unusable
 // answer) is retried with a growing pause, then the next option is used. A permanent failure
 // (wrong model name, bad key) skips straight to the next option. Total time stays under the
@@ -258,6 +283,8 @@ const firstOfEach = (list: string[]): string[] => {
 
 const VERDICTS = new Set(["relevant", "weak", "irrelevant"])
 const ISSUE_KINDS = new Set(["missing", "weak", "error"])
+const FITS = new Set(["core", "adjacent", "offrole", "unrelated", "soft"])
+const ROLE_WORK = new Set(["clear", "thin", "none"])
 const CERT_LEVELS = new Set(["role", "foundational", "unrelated"])
 const ITEM_KINDS = new Set(["skill", "experience", "project", "certification", "education", "other"])
 const cleanStr = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
@@ -317,7 +344,8 @@ export function parseFeedback(text: string): Feedback | null {
           excerpt: cleanStr(it.excerpt),
           verdict,
           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
-          roleWork: typeof it.roleWork === "boolean" ? it.roleWork : null,
+          fit: FITS.has(String(it.fit).trim().toLowerCase()) ? (String(it.fit).trim().toLowerCase() as SkillFit) : null,
+          roleWork: ROLE_WORK.has(String(it.roleWork).trim().toLowerCase()) ? (String(it.roleWork).trim().toLowerCase() as RoleWork) : null,
           certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
           solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,
@@ -326,6 +354,7 @@ export function parseFeedback(text: string): Feedback | null {
     skillsMissing: strList(raw.skillsMissing).map((x) => x.toUpperCase()),
     nextCerts: strList(raw.nextCerts).slice(0, 3),
     skillIdeas: firstOfEach(strList(raw.skillIdeas)).slice(0, 8),
+    handsOnIdeas: firstOfEach(strList(raw.handsOnIdeas)).slice(0, 3),
     mustHaves: (Array.isArray(raw.mustHaves) ? raw.mustHaves : [])
       .filter((m: any) => m && typeof m.id === "string" && typeof m.status === "string")
       .map((m: any) => ({
