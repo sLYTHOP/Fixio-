@@ -267,3 +267,12 @@ Deno.test("planAttempts: order, several Claude models, missing keys", () => {
   assert(names({ ...base, anthropicKey: "", fallback: "gemini" }) === "gemini/g1,gemini/g2", "a provider without a key is skipped")
   assert(planAttempts(base).every((a) => a.tries === 2), "two tries each")
 })
+
+Deno.test("parseFeedback: evidence quotes are trimmed and optional", () => {
+  const out = parseFeedback(JSON.stringify({ strengths: ["a"], items: [
+    { section: "EXPERIENCE", kind: "experience", excerpt: "x", verdict: "weak", evidence: { tool: " Splunk ", action: "", result: 5 } },
+    { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant" },
+  ] }))!
+  assert(out.items[0].evidence!.tool === "Splunk" && out.items[0].evidence!.action === null && out.items[0].evidence!.result === null, "cleaned")
+  assert(out.items[1].evidence === null, "missing evidence is null")
+})

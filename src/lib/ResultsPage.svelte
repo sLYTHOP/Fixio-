@@ -6,6 +6,7 @@
   import { getPendingResume, getPendingMeta, clearPendingResume, hasPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
   import FeedbackSection from './FeedbackSection.svelte'
+  import Footer from './Footer.svelte'
   import ResumePreview from './ResumePreview.svelte'
 
   export let user
@@ -14,8 +15,9 @@
   export let onSignOut = () => {}
   export let onTourReady = () => {}
 
-  let stage = hasPendingResume() ? 'processing' : 'loading' // processing -> done -> error, or loading saved feedback
+  let stage = hasPendingResume() ? 'processing' : 'loading' // processing -> done -> error/notice, or loading saved feedback
   let uploadError = ''
+  let friendlyMessage = ''
   let roleMeta = null
   let resumeFile = null
   let activeIssue = null
@@ -194,7 +196,8 @@
     unexpected_error: 'Something unexpected went wrong. Please try again.',
     unauthorized: 'Please log in again and retry.',
     forbidden: 'Something went wrong with your upload. Please try again.',
-    rate_limited: "You've hit today's limit of resume scans. Please come back tomorrow.",
+    rate_limited: "You've used your free scans for now. Please come back later.",
+    busy_today: 'Fixio is very busy today. Please try again tomorrow.',
     feedback_save_error: "Your feedback was generated but couldn't be saved. Please try again.",
   }
 
@@ -271,9 +274,16 @@
 
     if (fnError || !data?.ok) {
       finishAnalysisMessages()
-      stage = 'error'
-      uploadError = errorMessages[data?.reason] || 'Something went wrong. Please try again.'
-      console.error(fnError || data)
+      const reason = data?.reason
+      if (reason === 'rate_limited' || reason === 'busy_today') {
+        stage = 'notice'
+        friendlyMessage = errorMessages[reason]
+        console.info('[ResultsPage] analysis unavailable', { reason })
+      } else {
+        stage = 'error'
+        uploadError = errorMessages[reason] || 'Something went wrong. Please try again.'
+        console.error(fnError || data)
+      }
       trackEvent('feedback_failed', { reason: data?.reason || 'invoke_error' })
       return
     }
@@ -359,7 +369,7 @@
       {/if}
     </div>
 
-  {#if stage === 'loading' || stage === 'processing' || stage === 'error'}
+  {#if stage === 'loading' || stage === 'processing' || stage === 'error' || stage === 'notice'}
     <div class="state-wrap">
       <div class="state-card" class:processing-state={stage === 'processing'}>
         {#if stage === 'loading'}
@@ -386,6 +396,9 @@
             {/key}
           </div>
 
+        {:else if stage === 'notice'}
+          <p class="state-eyebrow" role="status">Just a heads-up</p>
+          <h1>{friendlyMessage}</h1>
         {:else if stage === 'error'}
           <p class="state-eyebrow error-eyebrow">We couldn’t finish your review</p>
           <h1>{uploadError}</h1>
@@ -723,6 +736,7 @@
     <FeedbackSection {user} />
   {/if}
   </main>
+  <Footer />
 </section>
 
 <style>

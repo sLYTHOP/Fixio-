@@ -4,7 +4,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2"
 import { parseFeedback, planAttempts, runWithFallback } from "./llm.ts"
-import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
+import { finalizeFeedback, parseEvidenceTerms, parseKnowledgeBase, parseSkillCatalog } from "./kb.ts"
 
 // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
 const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
@@ -22,9 +22,13 @@ const CLAUDE_MODELS = (Deno.env.get("CLAUDE_MODELS") ?? Deno.env.get("CLAUDE_MOD
   .split(",").map((m) => m.trim()).filter(Boolean)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
+// New scans allowed per user in SCAN_WINDOW_DAYS days (DAILY_LIMIT still works as the old name), and new scans
+// allowed across all users per 24 hours. Both protect paid credit. Raise them for testing, then set them back.
+const SCAN_LIMIT = Number(Deno.env.get("SCAN_LIMIT") ?? Deno.env.get("DAILY_LIMIT") ?? "3")
+const SCAN_WINDOW_DAYS = Number(Deno.env.get("SCAN_WINDOW_DAYS") ?? "30")
+const GLOBAL_DAILY_LIMIT = Number(Deno.env.get("GLOBAL_DAILY_LIMIT") ?? "30")
 // Bump when analysis prompt or output semantics change.
-const ANALYSIS_VERSION = "7"
+const ANALYSIS_VERSION = "8"
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest("SHA-256", bytes)
@@ -128,17 +132,29 @@ Deno.serve(async (req) => {
     if (matchingFeedback) return json({ ok: true, result: matchingFeedback.result, reused: true })
 
     // Reused analyses do not consume the per-user daily scan limit.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const since = new Date(Date.now() - SCAN_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
     const { count, error: countError } = await supabase
       .from("feedback")
       .select("id", { count: "exact", head: true })
       .eq("user_id", authedUser.id)
       .gte("created_at", since)
     if (countError) {
-      console.error("Failed to check the daily scan limit:", countError)
+      console.error("Failed to check the scan limit:", countError)
       return json({ ok: false, reason: "rate_limit_check_error" }, 500)
     }
-    if ((count ?? 0) >= DAILY_LIMIT) return json({ ok: false, reason: "rate_limited" })
+    if ((count ?? 0) >= SCAN_LIMIT) return json({ ok: false, reason: "rate_limited" })
+
+    // Across all users, per 24 hours: a safety stop for the paid credit.
+    const daySince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const { count: dayCount, error: dayError } = await supabase
+      .from("feedback")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", daySince)
+    if (dayError) {
+      console.error("Failed to check the overall scan limit:", dayError)
+      return json({ ok: false, reason: "rate_limit_check_error" }, 500)
+    }
+    if ((dayCount ?? 0) >= GLOBAL_DAILY_LIMIT) return json({ ok: false, reason: "busy_today" })
 
     let binary = ""
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
@@ -171,10 +187,11 @@ Instructions:
 - "skillIdeas": up to 8 short names (one to four words each, such as a tool, platform or technique) taken from the knowledge base items your skillsMissing refer to, that a candidate could list in a skills section instead of a weak skill. Most useful first. Plain names only, no sentences.
 - "handsOnIdeas": up to 3 hands-on project or lab ideas taken from the knowledge base (for example from its fix ideas), each one short sentence that names the tool and what to produce. Used to tell the candidate what to build when no experience or project shows the role's work.
 - "roleWork" is for experience entries and project bullets only (null for everything else). "clear" = shows work the role does day to day (as described by the must-have items) AND gives enough evidence: the tool or platform used, what was done, and the outcome or scale. "thin" = mentions that kind of work but without enough evidence: a keyword such as "log monitoring" or "incident response" on its own is "thin", not "clear". "none" = security-related or not, but not the role's day-to-day work (for example vulnerability testing, writing security documentation, building a model). Be strict: when in doubt, choose the lower level.
+- "evidence" is for experience entries and project bullets only (null for everything else): three exact quotes copied from that bullet, or null for each. tool = the words naming a specific tool, platform or technique actually used. action = the words saying what the candidate personally did; "supported", "assisted", "contributed to", "helped", "worked on" and "learned" are not actions. result = the words giving a number, an outcome or a deliverable. Do not decide whether the bullet is the role's work: the code decides that from your quotes. Only quote words that really are in the bullet.
 - A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
 - Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. A certification unrelated to security and IT is "irrelevant". For every certification item also set certLevel: "role" = aimed at the work of this role or above the foundational level on the knowledge base's ladder, "foundational" = an entry-level security or IT certification, "unrelated" = not about security or IT. Under "nextCerts" list up to 3 certification names from the knowledge base that are the next step beyond what the candidate already holds ([] if the candidate already holds role-level ones). Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
-- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork (experience and projects only) and certLevel (certifications only); null for the others.
-- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead.
+- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from the resume; for skills, certifications and education ONE single line of at most 15 words, never joined across lines; for experience and project items the WHOLE bullet point exactly as written, even when it wraps over two lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork and evidence (experience and projects only) and certLevel (certifications only); null for the others.
+- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead. For an experience or project bullet that is not the role's work, the "issue" first says in a few words what does carry over to the role (for example log analysis or SQL as a base for SIEM queries), if anything, then what is missing.
 - Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. A keyword alone is not evidence: "present" needs what was done, with which tool, and the outcome or scale; a bullet that only says "log monitoring" or "incident response" is "partial". For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
 - Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
 - Where the resume is already strong in an area, mark the items "relevant" and say so under strengths, as plain short phrases of at most 12 words with no praise words such as "gold-standard". Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
@@ -193,6 +210,7 @@ Instructions:
       "kbItems": ["MH1", "SP2"],
       "fit": "core | adjacent | offrole | unrelated | soft, for skills only, else null",
       "roleWork": "clear | thin | none, for experience and projects only, else null",
+      "evidence": {"tool": "exact words from the bullet or null", "action": "exact words from the bullet or null", "result": "exact words from the bullet or null"},
       "certLevel": "role | foundational | unrelated, for certifications only, else null",
       "issue": "what is weak and why it matters, or null when relevant",
       "solution": "a concrete, role-relevant way to improve it, or null when relevant"
@@ -245,7 +263,7 @@ Instructions:
 
     const parsed = parseFeedback(llm.text)
     if (!parsed) return json({ ok: false, reason: "parse_error" })
-    const final = finalizeFeedback(parsed, kbItems, kb.role_label)
+    const final = finalizeFeedback(parsed, kbItems, kb.role_label, parseEvidenceTerms(kb.content), parseSkillCatalog(kb.content))
 
     // 4. Persist the result so the user can revisit it later.
     const { error: saveError } = await supabase.from("feedback").insert({

@@ -5,7 +5,7 @@
 // cannot invent them. Every weak or irrelevant item and every missing must-have becomes an
 // issue here, so coverage does not depend on the model choosing to raise it.
 
-import type { Feedback, Item, IssueKind } from "./llm.ts"
+import type { Feedback, Item, IssueKind, RoleWork } from "./llm.ts"
 
 export type Tier = "MH" | "SP" | "NH" | "PA"
 export type KbItem = { id: string; tier: Tier; label: string; basis: string }
@@ -88,6 +88,42 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
 }
 
 const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
+// ---- checking experience and project bullets ----
+// Whether a bullet shows the role's work is decided here, not by the model's opinion. The subject words come from the
+// knowledge base ("Subject words: alert, incident, ..."). A bullet is "clear" only when it names the subject, says what
+// the candidate did (not "supported" or "contributed to"), and gives a tool or a result. The model supplies the tool,
+// action and result as exact quotes, and a quote that is not in the bullet is ignored.
+const WEAK_ACTION = /^(support|assist|contribut|help|work(ed|ing)? on|involv|participat|exposure|familiar|learn)/i
+
+export function parseEvidenceTerms(content: string): string[] {
+  const m = content.match(/^\s*Subject words:\s*(.+)$/im)
+  return m ? m[1].split(",").map((t) => t.trim().toLowerCase()).filter(Boolean) : []
+}
+
+// Lines like "Skills to list for MH1: Splunk, Microsoft Sentinel, Wazuh*" give concrete names a candidate can list for each
+// knowledge base item. A trailing star (practitioner-added name) is dropped here.
+export function parseSkillCatalog(content: string): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const line of content.split("\n")) {
+    const m = line.match(/^\s*Skills to list for ([A-Z]{2}\d+):\s*(.+)$/i)
+    if (m) out.set(m[1].toUpperCase(), m[2].split(",").map((x) => x.trim().replace(/\*+$/, "").trim()).filter(Boolean))
+  }
+  return out
+}
+
+const inText = (quote: string | null | undefined, text: string) => !!quote && norm(text).includes(norm(quote))
+
+export function evidenceLevel(it: Item, terms: string[]): RoleWork | null {
+  if (!terms.length || (it.kind !== "experience" && it.kind !== "project") || !it.excerpt) return it.roleWork
+  const text = it.excerpt
+  const subject = terms.some((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(text))
+  if (!subject) return "none"
+  const ev = it.evidence
+  const action = inText(ev?.action, text) && !WEAK_ACTION.test(norm(ev?.action ?? ""))
+  const proof = inText(ev?.tool, text) || inText(ev?.result, text)
+  return action && proof ? "clear" : "thin"
+}
+
 const shortLabel = (label: string) => label.split(":")[0].trim()
 const listOf = (names: string[]) =>
   names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
@@ -141,7 +177,15 @@ export function overallFor(items: Item[], summary: MustHaveSummary | null): Over
   return { level: "moderate", note: `Partly there${counts ? `: ${counts}` : ""}. Fixing the red items first, then the orange ones, will help most.` }
 }
 
-export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "this role"): FinalFeedback {
+export function finalizeFeedback(
+  parsed: Feedback,
+  kb: KbItem[],
+  roleLabel = "this role",
+  evidenceTerms: string[] = [],
+  skillCatalog: Map<string, string[]> = new Map(),
+): FinalFeedback {
+  // The level of evidence for each experience and project bullet is worked out here (see evidenceLevel).
+  parsed = { ...parsed, items: parsed.items.map((it) => ({ ...it, roleWork: evidenceLevel(it, evidenceTerms) })) }
   const byId = new Map(kb.map((i) => [i.id, i]))
   const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
   const colorRank: Record<IssueColor, number> = { red: 0, orange: 1 }
@@ -162,7 +206,24 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
 
   // Ideas for what to list instead of a weak skill. Each flagged skill takes the next two from a shared
   // list, so neighbouring skills do not all get the same advice.
-  const pool = parsed.skillIdeas.length ? parsed.skillIdeas : missingNames
+  // The names come from the knowledge base's "Skills to list" lines for the missing items, taken in turn from each
+  // item so the advice is varied, minus anything already listed in the skills section. The model's own ideas follow.
+  const listedTokens = parsed.items
+    .filter((i) => i.kind === "skill")
+    .flatMap((i) => (i.excerpt ?? "").split(/[,;/()|]+/))
+    .map((t) => norm(t))
+    .filter(Boolean)
+  const unlisted = (name: string) => {
+    const n = norm(name)
+    return !listedTokens.some((t) => t === n || t.startsWith(n + " "))
+  }
+  const lists = missing.map((k) => (skillCatalog.get(k.id) ?? []).filter(unlisted))
+  const candidates: string[] = []
+  for (let r = 0; lists.some((l) => r < l.length); r++) for (const l of lists) if (r < l.length) candidates.push(l[r])
+  candidates.push(...parsed.skillIdeas.filter(unlisted))
+  const seenNames = new Set<string>()
+  const merged = candidates.filter((n) => !seenNames.has(n.toLowerCase()) && !!seenNames.add(n.toLowerCase()))
+  const pool = merged.length ? merged : missingNames
   let next = 0
   const ideasFor = (): string => {
     if (!pool.length) return ""

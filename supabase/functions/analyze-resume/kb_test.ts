@@ -1,5 +1,5 @@
 // Run: deno test kb_test.ts
-import { buildMustHaveSummary, finalizeFeedback, gradeOf, issueColor, parseKnowledgeBase, priorityFor } from "./kb.ts"
+import { buildMustHaveSummary, evidenceLevel, finalizeFeedback, gradeOf, issueColor, parseEvidenceTerms, parseSkillCatalog, parseKnowledgeBase, priorityFor } from "./kb.ts"
 import type { Feedback, Item } from "./llm.ts"
 
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
 // ---------- verdicts, colors and issues built in code ----------
 
 const item = (over: Partial<Item>): Item =>
-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, certLevel: null, issue: null, solution: null, ...over })
+  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, evidence: null, certLevel: null, issue: null, solution: null, ...over })
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
@@ -437,4 +437,95 @@ Deno.test("grade: core, thin or irrelevant for every kind of item", () => {
   // grade describes the item, not whether it was flagged for room: unflagged adjacent skills are still thin
   assert(out.items.find((i) => i.excerpt === "Kali")!.color === "green", "Kali is green but still thin")
   assert(gradeOf(item({ kind: "experience", roleWork: "clear", verdict: "relevant" }), item({ kind: "experience", verdict: "weak" })) === "thin", "clear evidence the model still flagged is thin")
+})
+
+// ---------- evidence in experience and project bullets is checked in code ----------
+
+const TERMS = parseEvidenceTerms("Subject words: alert, incident, threat, attack, intrusion, malware, detect, siem, security event, security operations, false positive, triage, escalat")
+const bullet = (excerpt: string, evidence: Item["evidence"] = null, roleWork: Item["roleWork"] = null) =>
+  item({ section: "EXPERIENCE", kind: "experience", excerpt, evidence, roleWork })
+
+Deno.test("parseEvidenceTerms reads the knowledge base line", () => {
+  assert(TERMS.length === 13 && TERMS[0] === "alert" && TERMS[8] === "security event", TERMS.join("|"))
+  assert(parseEvidenceTerms("# no such line").length === 0, "none when the line is absent")
+})
+
+Deno.test("generic data and IT bullets are never clear, even when the model says they are", () => {
+  const generic = [
+    "Analyze server and log datasets using SQL to identify system performance trends and translate findings into structured reports for stakeholders.",
+    "Support database monitoring and configuration troubleshooting, validating data outputs against expected benchmarks.",
+    "Extract structured data for reporting and compliance documentation, coordinating across technical teams.",
+    "Conducted vulnerability assessments and analyzed structured traffic data; contributed to technical documentation.",
+    "Maintained comprehensive security documentation and contributed to standardised reporting frameworks.",
+  ]
+  for (const g of generic) {
+    const it = bullet(g, { tool: "SQL", action: "Analyze", result: "reports" }, "clear")
+    assert(evidenceLevel(it, TERMS) === "none", "not role work: " + g.slice(0, 40))
+  }
+})
+
+Deno.test("a bullet is clear only with the subject, a real action and a tool or result", () => {
+  const text = "Investigated 10+ security incidents using IBM QRadar by analyzing authentication logs to separate malicious activity from false positives with 95% accuracy."
+  assert(evidenceLevel(bullet(text, { tool: "IBM QRadar", action: "Investigated 10+ security incidents", result: "95% accuracy" }), TERMS) === "clear", "full evidence")
+  assert(evidenceLevel(bullet(text, { tool: null, action: "Investigated", result: "95% accuracy" }), TERMS) === "clear", "a result is enough without a tool")
+  assert(evidenceLevel(bullet(text, { tool: "IBM QRadar", action: null, result: null }), TERMS) === "thin", "no action")
+  assert(evidenceLevel(bullet(text, { tool: "Splunk", action: "Investigated", result: "99% accuracy" }), TERMS) === "thin", "quotes that are not in the bullet are ignored")
+  assert(evidenceLevel(bullet(text, null), TERMS) === "thin", "no evidence given")
+  const weak = "Contributed to incident response workflows and threat mitigation efforts, strengthening real-world security assessment capabilities."
+  assert(evidenceLevel(bullet(weak, { tool: null, action: "Contributed to incident response workflows", result: null }), TERMS) === "thin", "'contributed to' is not an action")
+  const learn = "Learned and applied basic security operations concepts, including monitoring and log review, through guided tasks."
+  assert(evidenceLevel(bullet(learn, { tool: null, action: "Learned and applied basic security operations concepts", result: null }), TERMS) === "thin", "'learned' is not an action")
+  assert(evidenceLevel(bullet("Triaged alerts", { tool: null, action: "Triaged alerts", result: "40 alerts" }), TERMS) === "thin", "a result that is not in the bullet does not count")
+})
+
+Deno.test("without subject words in the knowledge base the model's own label is kept", () => {
+  assert(evidenceLevel(bullet("anything", null, "clear"), []) === "clear", "fallback to the model label")
+  assert(evidenceLevel(item({ kind: "skill", excerpt: "SIEM", roleWork: null }), TERMS) === null, "skills are not checked")
+})
+
+Deno.test("finalize uses the checked level: a bullet the model called clear turns orange", () => {
+  const kb = parseKnowledgeBase(KB)
+  const out = finalizeFeedback(withItems([
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "Analyze server and log datasets using SQL to find performance trends.", roleWork: "clear", evidence: { tool: "SQL", action: "Analyze", result: null }, kbItems: ["MH2"] }),
+    item({ section: "EXPERIENCE", kind: "experience", excerpt: "Triaged 40 security alerts in Splunk and escalated 6 incidents.", roleWork: "none", evidence: { tool: "Splunk", action: "Triaged 40 security alerts", result: "escalated 6 incidents" } }),
+  ]), kb, "SOC Analyst", TERMS)
+  assert(out.items.map((i) => i.color).join() === "orange,green", out.items.map((i) => i.color).join())
+  assert(out.items.map((i) => i.grade).join() === "thin,core", "grades follow")
+  assert(out.issues.some((i) => i.excerpt!.startsWith("Analyze server") && i.issue === "This does not show work SOC Analyst does day to day."), "reason for the generic bullet")
+})
+
+// ---------- concrete skill names come from the knowledge base ----------
+
+Deno.test("parseSkillCatalog reads the lines and drops practitioner stars", () => {
+  const cat = parseSkillCatalog("Skills to list for MH1: Splunk, Microsoft Sentinel, Wazuh*\nSkills to list for sp1: Python, Bash\n- [MH1] x (y)\nnoise")
+  assert(cat.size === 2 && cat.get("MH1")!.join() === "Splunk,Microsoft Sentinel,Wazuh" && cat.get("SP1")!.join() === "Python,Bash", JSON.stringify([...cat]))
+})
+
+Deno.test("weak skills get varied ideas from several knowledge base items, never ones already listed", () => {
+  const kb = parseKnowledgeBase(KB)
+  const cat = new Map([
+    ["MH1", ["Splunk", "Sentinel", "QRadar"]],
+    ["MH2", ["Alert triage", "Runbooks", "Escalation"]],
+    ["SP1", ["Python", "Bash", "PowerShell"]],
+  ])
+  const weak = ["HTML", "CSS", "MySQL", "Excel", "Figma", "VS Code"].map((e) => skill(e, "offrole"))
+  const parsed = withItems([skill("Wireshark, Splunk", "core"), ...weak])
+  parsed.skillsMissing = ["MH1", "MH2", "SP1"]
+  parsed.skillIdeas = ["Linux"]
+  const out = finalizeFeedback(parsed, kb, "SOC Analyst", [], cat)
+  const fixes = ["HTML", "CSS", "MySQL"].map((e) => out.issues.find((i) => i.excerpt === e)!.solution)
+  assert(fixes[0] === "Try listing Sentinel or Alert triage here instead, if you have used them.", fixes[0])
+  assert(fixes[1] === "Try listing Python or QRadar here instead, if you have used them.", fixes[1])
+  assert(fixes[2] === "Try listing Runbooks or Bash here instead, if you have used them.", fixes[2])
+  assert(!fixes.some((f) => f.includes("Splunk")), "Splunk is already listed")
+  assert(new Set(fixes).size === 3, "no two neighbours get the same advice")
+})
+
+Deno.test("without catalog lines the model's ideas are used, as before", () => {
+  const kb = parseKnowledgeBase(KB)
+  const parsed = withItems([skill("HTML", "offrole")])
+  parsed.skillsMissing = ["MH1"]
+  parsed.skillIdeas = ["Linux", "Python"]
+  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
+  assert(out.issues[0].solution === "Try listing Linux or Python here instead, if you have used them.", out.issues[0].solution)
 })

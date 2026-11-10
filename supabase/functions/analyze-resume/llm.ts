@@ -28,6 +28,7 @@ export type Item = {
   kbItems: string[]
   fit: SkillFit | null // skills only
   roleWork: RoleWork | null // experience and projects only: clear evidence, thin evidence or none of the role's day-to-day work
+  evidence: { tool: string | null; action: string | null; result: string | null } | null // experience and projects only: exact quotes from the bullet
   certLevel: "role" | "foundational" | "unrelated" | null // certifications only
   issue: string | null
   solution: string | null
@@ -345,6 +346,9 @@ export function parseFeedback(text: string): Feedback | null {
           verdict,
           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
           fit: FITS.has(String(it.fit).trim().toLowerCase()) ? (String(it.fit).trim().toLowerCase() as SkillFit) : null,
+          evidence: it.evidence && typeof it.evidence === "object"
+            ? { tool: cleanStr(it.evidence.tool), action: cleanStr(it.evidence.action), result: cleanStr(it.evidence.result) }
+            : null,
           roleWork: ROLE_WORK.has(String(it.roleWork).trim().toLowerCase()) ? (String(it.roleWork).trim().toLowerCase() as RoleWork) : null,
           certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
