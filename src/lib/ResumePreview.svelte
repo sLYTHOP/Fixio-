@@ -403,7 +403,7 @@
         console.warn('[ResumePreview] no PDF text match for issue excerpt', { index, excerpt: issue.excerpt })
       })
       if (issues.some((_, index) => !nextMarks.some((mark) => mark.issueIndex === index))) {
-        highlightWarning = 'Some findings could not be matched to selectable text in the PDF. Red and orange labels use the exact quote when it is unique; findings without a quote point to their section heading. Every finding and suggestion is still listed alongside the preview.'
+        highlightWarning = 'Please refer to the Issues section for the full list of issues.'
       } else {
         highlightWarning = ''
       }

@@ -551,7 +551,7 @@
         {/if}
       </section>
 
-      <section class="review-layout" aria-label="Resume and review notes">
+      <section class="review-layout" aria-label="Resume and issues">
         <div class="resume-column">
           <ResumePreview
             file={resumeFile}
@@ -568,10 +568,10 @@
           <section data-tour="issues" class="review-card issues-card">
             <div class="section-heading">
               <div>
-                <h2>Review notes</h2>
+                <h2>Issues</h2>
               </div>
               <span class="note-count">
-                {feedback.issues.length} {feedback.issues.length === 1 ? 'note' : 'notes'}
+                {feedback.issues.length} {feedback.issues.length === 1 ? 'issue' : 'issues'}
               </span>
             </div>
 
@@ -618,7 +618,7 @@
                 </button>
               </div>
 
-              <nav class="issue-navigation" aria-label="Review issue navigation">
+              <nav class="issue-navigation" aria-label="Issue navigation">
                 <span aria-live="polite">Issue {currentIssueIndex + 1} of {feedback.issues.length}</span>
               </nav>
 
@@ -1112,9 +1112,9 @@
 
   .issue-carousel {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
     margin-top: 14px;
   }
 
@@ -1185,8 +1185,8 @@
 
   .current-issue {
     display: block;
-    flex: 0 1 390px;
-    max-width: 390px;
+    flex: 0 1 460px;
+    max-width: 460px;
     min-width: 0;
     cursor: default;
   }
@@ -1219,7 +1219,7 @@
 
   .issue-section {
     color: var(--ink-soft);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
@@ -1254,20 +1254,20 @@
 
   .issue-title {
     display: block;
-    margin: 6px 0 0 26px;
-    font-size: 10px;
+    margin: 8px 0 0 26px;
+    font-size: 13px;
     font-weight: 650;
-    line-height: 1.5;
+    line-height: 1.55;
   }
 
   .issue-detail {
     display: block;
-    margin: 10px 0 1px 26px;
-    padding-top: 9px;
+    margin: 12px 0 1px 26px;
+    padding-top: 10px;
     border-top: 1px solid var(--line);
     color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.55;
+    font-size: 13px;
+    line-height: 1.6;
   }
 
   .solution-label {
@@ -1658,12 +1658,15 @@
     }
 
     .issue-section {
-      font-size: 10px;
+      font-size: 11px;
     }
 
-    .issue-title,
+    .issue-title {
+      font-size: 14px;
+    }
+
     .issue-detail {
-      font-size: 12px;
+      font-size: 14px;
     }
 
     .solution-label {
