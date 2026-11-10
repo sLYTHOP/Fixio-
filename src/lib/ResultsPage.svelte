@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
   import { fly } from 'svelte/transition'
-  import { ArrowLeft, ArrowRight, House, Sun, Moon, Check } from '@lucide/svelte'
+  import { ArrowLeft, House, Sun, Moon, Check } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume, hasPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -11,7 +11,6 @@
   export let user
   export let onHome = () => {}
   export let onRetry = () => {}
-  export let onHelp = () => {}
   export let onSignOut = () => {}
   export let onTourReady = () => {}
 
@@ -340,12 +339,6 @@
             Dark
           </button>
         </div>
-        {#if stage === 'done' && !paymentPageOpen}
-          <button type="button" class="header-text-button tour-button" on:click={onHelp} aria-label="Restart product tour">
-            <span class="tour-full-label">Take a tour</span>
-            <span class="tour-compact-label">Tour</span>
-          </button>
-        {/if}
         <button type="button" class="header-text-button signout-button" on:click={onSignOut}>Sign out</button>
       </div>
     </div>
@@ -585,7 +578,10 @@
                   disabled={currentIssueIndex === 0}
                   on:click={() => navigateIssue(-1)}
                 >
-                  <ArrowLeft size={17} strokeWidth={2.2} aria-hidden="true" />
+                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M9 14 4 9l5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M4 9h10a6 6 0 0 1 0 12h-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
                 </button>
                 <article id="selected-issue-card" class="issue-card-item current-issue">
                   {#if currentIssue}
@@ -614,7 +610,10 @@
                   disabled={currentIssueIndex >= feedback.issues.length - 1}
                   on:click={() => navigateIssue(1)}
                 >
-                  <ArrowRight size={17} strokeWidth={2.2} aria-hidden="true" />
+                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="m15 14 5-5-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 9H10a6 6 0 0 0 0 12h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
                 </button>
               </div>
 
@@ -874,10 +873,6 @@
     color: var(--ink);
   }
 
-  .tour-compact-label {
-    display: none;
-  }
-
   .results-main {
     padding: 27px 0 56px;
   }
@@ -1123,21 +1118,22 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    margin-top: 10px;
+    margin-top: 12px;
     color: var(--ink-soft);
-    font-size: 10px;
-    font-weight: 650;
+    font-size: 13px;
+    font-weight: 700;
   }
 
   .issue-nav-button {
-    width: 34px;
-    min-width: 34px;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
     align-self: center;
     display: grid;
     place-items: center;
     padding: 0;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 50%;
     background: var(--surface-2);
     color: var(--ink);
     font: inherit;
@@ -1156,12 +1152,12 @@
 
   .issue-toggle-all {
     display: block;
-    margin: 11px auto 0;
-    padding: 4px 8px;
+    margin: 12px auto 0;
+    padding: 7px 12px;
     border: 0;
     background: transparent;
     color: var(--accent);
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
   }
@@ -1726,14 +1722,6 @@
 
     .results-header-actions {
       gap: 9px;
-    }
-
-    .tour-full-label {
-      display: none;
-    }
-
-    .tour-compact-label {
-      display: inline;
     }
 
     .header-text-button {

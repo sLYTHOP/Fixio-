@@ -1,0 +1,346 @@
+diff --git a/supabase/functions/analyze-resume/index.ts b/supabase/functions/analyze-resume/index.ts
+index a369982..4d16ff6 100644
+--- a/supabase/functions/analyze-resume/index.ts
++++ b/supabase/functions/analyze-resume/index.ts
+@@ -4,7 +4,7 @@
+ 
+ import { createClient } from "npm:@supabase/supabase-js@2"
+ import { parseFeedback, planAttempts, runWithFallback } from "./llm.ts"
+-import { finalizeFeedback, parseKnowledgeBase } from "./kb.ts"
++import { finalizeFeedback, parseEvidenceTerms, parseKnowledgeBase, parseSkillCatalog } from "./kb.ts"
+ 
+ // Which model answers: set LLM_PROVIDER to "gemini" or "claude" (default claude).
+ const LLM_PROVIDER = (Deno.env.get("LLM_PROVIDER") ?? "claude").toLowerCase()
+@@ -22,9 +22,13 @@ const CLAUDE_MODELS = (Deno.env.get("CLAUDE_MODELS") ?? Deno.env.get("CLAUDE_MOD
+   .split(",").map((m) => m.trim()).filter(Boolean)
+ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
+ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+-const DAILY_LIMIT = Number(Deno.env.get("DAILY_LIMIT") ?? "5") // scans per user per 24h, protects paid credit. Raise it for testing.
++// New scans allowed per user in SCAN_WINDOW_DAYS days (DAILY_LIMIT still works as the old name), and new scans
++// allowed across all users per 24 hours. Both protect paid credit. Raise them for testing, then set them back.
++const SCAN_LIMIT = Number(Deno.env.get("SCAN_LIMIT") ?? Deno.env.get("DAILY_LIMIT") ?? "3")
++const SCAN_WINDOW_DAYS = Number(Deno.env.get("SCAN_WINDOW_DAYS") ?? "30")
++const GLOBAL_DAILY_LIMIT = Number(Deno.env.get("GLOBAL_DAILY_LIMIT") ?? "30")
+ // Bump when analysis prompt or output semantics change.
+-const ANALYSIS_VERSION = "7"
++const ANALYSIS_VERSION = "8"
+ 
+ async function sha256Hex(bytes: Uint8Array) {
+   const digest = await crypto.subtle.digest("SHA-256", bytes)
+@@ -128,17 +132,29 @@ Deno.serve(async (req) => {
+     if (matchingFeedback) return json({ ok: true, result: matchingFeedback.result, reused: true })
+ 
+     // Reused analyses do not consume the per-user daily scan limit.
+-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
++    const since = new Date(Date.now() - SCAN_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
+     const { count, error: countError } = await supabase
+       .from("feedback")
+       .select("id", { count: "exact", head: true })
+       .eq("user_id", authedUser.id)
+       .gte("created_at", since)
+     if (countError) {
+-      console.error("Failed to check the daily scan limit:", countError)
++      console.error("Failed to check the scan limit:", countError)
+       return json({ ok: false, reason: "rate_limit_check_error" }, 500)
+     }
+-    if ((count ?? 0) >= DAILY_LIMIT) return json({ ok: false, reason: "rate_limited" })
++    if ((count ?? 0) >= SCAN_LIMIT) return json({ ok: false, reason: "rate_limited" })
++
++    // Across all users, per 24 hours: a safety stop for the paid credit.
++    const daySince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
++    const { count: dayCount, error: dayError } = await supabase
++      .from("feedback")
++      .select("id", { count: "exact", head: true })
++      .gte("created_at", daySince)
++    if (dayError) {
++      console.error("Failed to check the overall scan limit:", dayError)
++      return json({ ok: false, reason: "rate_limit_check_error" }, 500)
++    }
++    if ((dayCount ?? 0) >= GLOBAL_DAILY_LIMIT) return json({ ok: false, reason: "busy_today" })
+ 
+     let binary = ""
+     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+@@ -171,10 +187,11 @@ Instructions:
+ - "skillIdeas": up to 8 short names (one to four words each, such as a tool, platform or technique) taken from the knowledge base items your skillsMissing refer to, that a candidate could list in a skills section instead of a weak skill. Most useful first. Plain names only, no sentences.
+ - "handsOnIdeas": up to 3 hands-on project or lab ideas taken from the knowledge base (for example from its fix ideas), each one short sentence that names the tool and what to produce. Used to tell the candidate what to build when no experience or project shows the role's work.
+ - "roleWork" is for experience entries and project bullets only (null for everything else). "clear" = shows work the role does day to day (as described by the must-have items) AND gives enough evidence: the tool or platform used, what was done, and the outcome or scale. "thin" = mentions that kind of work but without enough evidence: a keyword such as "log monitoring" or "incident response" on its own is "thin", not "clear". "none" = security-related or not, but not the role's day-to-day work (for example vulnerability testing, writing security documentation, building a model). Be strict: when in doubt, choose the lower level.
++- "evidence" is for experience entries and project bullets only (null for everything else): three exact quotes copied from that bullet, or null for each. tool = the words naming a specific tool, platform or technique actually used. action = the words saying what the candidate personally did; "supported", "assisted", "contributed to", "helped", "worked on" and "learned" are not actions. result = the words giving a number, an outcome or a deliverable. Do not decide whether the bullet is the role's work: the code decides that from your quotes. Only quote words that really are in the bullet.
+ - A project or experience that is not SOC work is "weak", not "irrelevant", when it still shows items the knowledge base asks for. State plainly that it is not SOC-related, say which items it does support in kbItems, and name which bullets to reword toward SOC work (alert handling, log analysis, triage, documentation).
+ - Certifications: a certification the knowledge base names as common for this role is "relevant", and one in progress is fine to list. A course badge or a certification the postings do not name is "weak": say gently that it carries less weight than a certification, and point to the next step on the knowledge base's certification ladder or fix ideas. A certification unrelated to security and IT is "irrelevant". For every certification item also set certLevel: "role" = aimed at the work of this role or above the foundational level on the knowledge base's ladder, "foundational" = an entry-level security or IT certification, "unrelated" = not about security or IT. Under "nextCerts" list up to 3 certification names from the knowledge base that are the next step beyond what the candidate already holds ([] if the candidate already holds role-level ones). Only suggest certifications that appear in the knowledge base. Never suggest adding, renaming or splitting sections: the resume is one page.
+-- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from ONE single line of the resume, at most 15 words, never joined across lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork (experience and projects only) and certLevel (certifications only); null for the others.
+-- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead.
++- Every item has: section (the exact heading as printed in the resume), kind (skill, experience, project, certification, education or other), excerpt (an exact quote copied from the resume; for skills, certifications and education ONE single line of at most 15 words, never joined across lines; for experience and project items the WHOLE bullet point exactly as written, even when it wraps over two lines; null only if there is nothing to quote), verdict, kbItems (IDs of the knowledge base items the item supports, [] if none), and for "weak" and "irrelevant" items also issue (what is weak and why it matters, one or two sentences) and solution (one or two sentences). For "relevant" items, issue and solution are null. Also fit (skills only), roleWork and evidence (experience and projects only) and certLevel (certifications only); null for the others.
++- Tone: polite and encouraging, written to the candidate. "issue" says only WHY the item is flagged, in one sentence, with no advice. "solution" says what to do, in one or two sentences. Start every solution with a different word and never start more than two with the same word; use verbs such as Add, Name, Swap, Show, Try, Mention, Reword, Pair. Say exactly which words are meant and what to put instead, and name the exact skill, bullet, project or certification. For an item in a skills list never tell the candidate to "explain how it was used": suggest showing it in a bullet instead. For an experience or project bullet that is not the role's work, the "issue" first says in a few words what does carry over to the role (for example log analysis or SQL as a base for SIEM queries), if anything, then what is missing.
+ - Assess EVERY [MH#] item and list it under "mustHaves" with a status: "present" (clearly shown in the resume), "partial" (only hinted at, or weak) or "missing". Give evidence as a short exact quote from the resume, or null when missing. Never mark an item "present" without a quote. Look for synonyms and related wording before marking an item missing (a project that triages alerts shows alert triage even if the word "runbook" never appears). Tool names in the knowledge base are examples of a concept, never required. A keyword alone is not evidence: "present" needs what was done, with which tool, and the outcome or scale; a bullet that only says "log monitoring" or "incident response" is "partial". For "partial" and "missing" items also give section (the resume section where the fix belongs) and solution (one concrete sentence). When an item combines a tool or platform with an activity, naming or using the platform is needed for "present"; the activity alone is "partial". Never raise an issue about a must-have you marked "present". Never leave out an [MH#] item: every one must appear under "mustHaves".
+ - Under "issues" put only problems that no single item shows: content the resume lacks entirely (excerpt null, section = the heading where it belongs), date problems, and formatting problems. Give each a kind: "missing" (content that should be there), "error" (a date after today or an end date before its start date, missing contact details, unreadable sections) or "weak". Set kbItem to the knowledge base item ID it comes from, or null. Do not repeat a problem already covered by an item. Base missing content mainly on [MH#] and [SP#] items. Never present an [NH#] or [PA#] item as a major problem.
+ - Where the resume is already strong in an area, mark the items "relevant" and say so under strengths, as plain short phrases of at most 12 words with no praise words such as "gold-standard". Do not invent gaps. Every weak or irrelevant verdict must be real and specific to the resume.
+@@ -193,6 +210,7 @@ Instructions:
+       "kbItems": ["MH1", "SP2"],
+       "fit": "core | adjacent | offrole | unrelated | soft, for skills only, else null",
+       "roleWork": "clear | thin | none, for experience and projects only, else null",
++      "evidence": {"tool": "exact words from the bullet or null", "action": "exact words from the bullet or null", "result": "exact words from the bullet or null"},
+       "certLevel": "role | foundational | unrelated, for certifications only, else null",
+       "issue": "what is weak and why it matters, or null when relevant",
+       "solution": "a concrete, role-relevant way to improve it, or null when relevant"
+@@ -245,7 +263,7 @@ Instructions:
+ 
+     const parsed = parseFeedback(llm.text)
+     if (!parsed) return json({ ok: false, reason: "parse_error" })
+-    const final = finalizeFeedback(parsed, kbItems, kb.role_label)
++    const final = finalizeFeedback(parsed, kbItems, kb.role_label, parseEvidenceTerms(kb.content), parseSkillCatalog(kb.content))
+ 
+     // 4. Persist the result so the user can revisit it later.
+     const { error: saveError } = await supabase.from("feedback").insert({
+diff --git a/supabase/functions/analyze-resume/kb.ts b/supabase/functions/analyze-resume/kb.ts
+index 08b9b28..b7fe48b 100644
+--- a/supabase/functions/analyze-resume/kb.ts
++++ b/supabase/functions/analyze-resume/kb.ts
+@@ -5,7 +5,7 @@
+ // cannot invent them. Every weak or irrelevant item and every missing must-have becomes an
+ // issue here, so coverage does not depend on the model choosing to raise it.
+ 
+-import type { Feedback, Item, IssueKind } from "./llm.ts"
++import type { Feedback, Item, IssueKind, RoleWork } from "./llm.ts"
+ 
+ export type Tier = "MH" | "SP" | "NH" | "PA"
+ export type KbItem = { id: string; tier: Tier; label: string; basis: string }
+@@ -88,6 +88,42 @@ export function buildMustHaveSummary(kb: KbItem[], reported: Feedback["mustHaves
+ }
+ 
+ const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").trim()
++// ---- checking experience and project bullets ----
++// Whether a bullet shows the role's work is decided here, not by the model's opinion. The subject words come from the
++// knowledge base ("Subject words: alert, incident, ..."). A bullet is "clear" only when it names the subject, says what
++// the candidate did (not "supported" or "contributed to"), and gives a tool or a result. The model supplies the tool,
++// action and result as exact quotes, and a quote that is not in the bullet is ignored.
++const WEAK_ACTION = /^(support|assist|contribut|help|work(ed|ing)? on|involv|participat|exposure|familiar|learn)/i
++
++export function parseEvidenceTerms(content: string): string[] {
++  const m = content.match(/^\s*Subject words:\s*(.+)$/im)
++  return m ? m[1].split(",").map((t) => t.trim().toLowerCase()).filter(Boolean) : []
++}
++
++// Lines like "Skills to list for MH1: Splunk, Microsoft Sentinel, Wazuh*" give concrete names a candidate can list for each
++// knowledge base item. A trailing star (practitioner-added name) is dropped here.
++export function parseSkillCatalog(content: string): Map<string, string[]> {
++  const out = new Map<string, string[]>()
++  for (const line of content.split("\n")) {
++    const m = line.match(/^\s*Skills to list for ([A-Z]{2}\d+):\s*(.+)$/i)
++    if (m) out.set(m[1].toUpperCase(), m[2].split(",").map((x) => x.trim().replace(/\*+$/, "").trim()).filter(Boolean))
++  }
++  return out
++}
++
++const inText = (quote: string | null | undefined, text: string) => !!quote && norm(text).includes(norm(quote))
++
++export function evidenceLevel(it: Item, terms: string[]): RoleWork | null {
++  if (!terms.length || (it.kind !== "experience" && it.kind !== "project") || !it.excerpt) return it.roleWork
++  const text = it.excerpt
++  const subject = terms.some((t) => new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(text))
++  if (!subject) return "none"
++  const ev = it.evidence
++  const action = inText(ev?.action, text) && !WEAK_ACTION.test(norm(ev?.action ?? ""))
++  const proof = inText(ev?.tool, text) || inText(ev?.result, text)
++  return action && proof ? "clear" : "thin"
++}
++
+ const shortLabel = (label: string) => label.split(":")[0].trim()
+ const listOf = (names: string[]) =>
+   names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+@@ -141,7 +177,15 @@ export function overallFor(items: Item[], summary: MustHaveSummary | null): Over
+   return { level: "moderate", note: `Partly there${counts ? `: ${counts}` : ""}. Fixing the red items first, then the orange ones, will help most.` }
+ }
+ 
+-export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "this role"): FinalFeedback {
++export function finalizeFeedback(
++  parsed: Feedback,
++  kb: KbItem[],
++  roleLabel = "this role",
++  evidenceTerms: string[] = [],
++  skillCatalog: Map<string, string[]> = new Map(),
++): FinalFeedback {
++  // The level of evidence for each experience and project bullet is worked out here (see evidenceLevel).
++  parsed = { ...parsed, items: parsed.items.map((it) => ({ ...it, roleWork: evidenceLevel(it, evidenceTerms) })) }
+   const byId = new Map(kb.map((i) => [i.id, i]))
+   const rank: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
+   const colorRank: Record<IssueColor, number> = { red: 0, orange: 1 }
+@@ -162,7 +206,24 @@ export function finalizeFeedback(parsed: Feedback, kb: KbItem[], roleLabel = "th
+ 
+   // Ideas for what to list instead of a weak skill. Each flagged skill takes the next two from a shared
+   // list, so neighbouring skills do not all get the same advice.
+-  const pool = parsed.skillIdeas.length ? parsed.skillIdeas : missingNames
++  // The names come from the knowledge base's "Skills to list" lines for the missing items, taken in turn from each
++  // item so the advice is varied, minus anything already listed in the skills section. The model's own ideas follow.
++  const listedTokens = parsed.items
++    .filter((i) => i.kind === "skill")
++    .flatMap((i) => (i.excerpt ?? "").split(/[,;/()|]+/))
++    .map((t) => norm(t))
++    .filter(Boolean)
++  const unlisted = (name: string) => {
++    const n = norm(name)
++    return !listedTokens.some((t) => t === n || t.startsWith(n + " "))
++  }
++  const lists = missing.map((k) => (skillCatalog.get(k.id) ?? []).filter(unlisted))
++  const candidates: string[] = []
++  for (let r = 0; lists.some((l) => r < l.length); r++) for (const l of lists) if (r < l.length) candidates.push(l[r])
++  candidates.push(...parsed.skillIdeas.filter(unlisted))
++  const seenNames = new Set<string>()
++  const merged = candidates.filter((n) => !seenNames.has(n.toLowerCase()) && !!seenNames.add(n.toLowerCase()))
++  const pool = merged.length ? merged : missingNames
+   let next = 0
+   const ideasFor = (): string => {
+     if (!pool.length) return ""
+diff --git a/supabase/functions/analyze-resume/kb_test.ts b/supabase/functions/analyze-resume/kb_test.ts
+index a8798e8..e0eb6d2 100644
+--- a/supabase/functions/analyze-resume/kb_test.ts
++++ b/supabase/functions/analyze-resume/kb_test.ts
+@@ -1,5 +1,5 @@
+ // Run: deno test kb_test.ts
+-import { buildMustHaveSummary, finalizeFeedback, gradeOf, issueColor, parseKnowledgeBase, priorityFor } from "./kb.ts"
++import { buildMustHaveSummary, evidenceLevel, finalizeFeedback, gradeOf, issueColor, parseEvidenceTerms, parseSkillCatalog, parseKnowledgeBase, priorityFor } from "./kb.ts"
+ import type { Feedback, Item } from "./llm.ts"
+ 
+ const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
+@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
+ // ---------- verdicts, colors and issues built in code ----------
+ 
+ const item = (over: Partial<Item>): Item =>
+-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, certLevel: null, issue: null, solution: null, ...over })
++  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, evidence: null, certLevel: null, issue: null, solution: null, ...over })
+ const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
+   ({ ...base(issues, mustHaves), items })
+ 
+@@ -438,3 +438,94 @@ Deno.test("grade: core, thin or irrelevant for every kind of item", () => {
+   assert(out.items.find((i) => i.excerpt === "Kali")!.color === "green", "Kali is green but still thin")
+   assert(gradeOf(item({ kind: "experience", roleWork: "clear", verdict: "relevant" }), item({ kind: "experience", verdict: "weak" })) === "thin", "clear evidence the model still flagged is thin")
+ })
++
++// ---------- evidence in experience and project bullets is checked in code ----------
++
++const TERMS = parseEvidenceTerms("Subject words: alert, incident, threat, attack, intrusion, malware, detect, siem, security event, security operations, false positive, triage, escalat")
++const bullet = (excerpt: string, evidence: Item["evidence"] = null, roleWork: Item["roleWork"] = null) =>
++  item({ section: "EXPERIENCE", kind: "experience", excerpt, evidence, roleWork })
++
++Deno.test("parseEvidenceTerms reads the knowledge base line", () => {
++  assert(TERMS.length === 13 && TERMS[0] === "alert" && TERMS[8] === "security event", TERMS.join("|"))
++  assert(parseEvidenceTerms("# no such line").length === 0, "none when the line is absent")
++})
++
++Deno.test("generic data and IT bullets are never clear, even when the model says they are", () => {
++  const generic = [
++    "Analyze server and log datasets using SQL to identify system performance trends and translate findings into structured reports for stakeholders.",
++    "Support database monitoring and configuration troubleshooting, validating data outputs against expected benchmarks.",
++    "Extract structured data for reporting and compliance documentation, coordinating across technical teams.",
++    "Conducted vulnerability assessments and analyzed structured traffic data; contributed to technical documentation.",
++    "Maintained comprehensive security documentation and contributed to standardised reporting frameworks.",
++  ]
++  for (const g of generic) {
++    const it = bullet(g, { tool: "SQL", action: "Analyze", result: "reports" }, "clear")
++    assert(evidenceLevel(it, TERMS) === "none", "not role work: " + g.slice(0, 40))
++  }
++})
++
++Deno.test("a bullet is clear only with the subject, a real action and a tool or result", () => {
++  const text = "Investigated 10+ security incidents using IBM QRadar by analyzing authentication logs to separate malicious activity from false positives with 95% accuracy."
++  assert(evidenceLevel(bullet(text, { tool: "IBM QRadar", action: "Investigated 10+ security incidents", result: "95% accuracy" }), TERMS) === "clear", "full evidence")
++  assert(evidenceLevel(bullet(text, { tool: null, action: "Investigated", result: "95% accuracy" }), TERMS) === "clear", "a result is enough without a tool")
++  assert(evidenceLevel(bullet(text, { tool: "IBM QRadar", action: null, result: null }), TERMS) === "thin", "no action")
++  assert(evidenceLevel(bullet(text, { tool: "Splunk", action: "Investigated", result: "99% accuracy" }), TERMS) === "thin", "quotes that are not in the bullet are ignored")
++  assert(evidenceLevel(bullet(text, null), TERMS) === "thin", "no evidence given")
++  const weak = "Contributed to incident response workflows and threat mitigation efforts, strengthening real-world security assessment capabilities."
++  assert(evidenceLevel(bullet(weak, { tool: null, action: "Contributed to incident response workflows", result: null }), TERMS) === "thin", "'contributed to' is not an action")
++  const learn = "Learned and applied basic security operations concepts, including monitoring and log review, through guided tasks."
++  assert(evidenceLevel(bullet(learn, { tool: null, action: "Learned and applied basic security operations concepts", result: null }), TERMS) === "thin", "'learned' is not an action")
++  assert(evidenceLevel(bullet("Triaged alerts", { tool: null, action: "Triaged alerts", result: "40 alerts" }), TERMS) === "thin", "a result that is not in the bullet does not count")
++})
++
++Deno.test("without subject words in the knowledge base the model's own label is kept", () => {
++  assert(evidenceLevel(bullet("anything", null, "clear"), []) === "clear", "fallback to the model label")
++  assert(evidenceLevel(item({ kind: "skill", excerpt: "SIEM", roleWork: null }), TERMS) === null, "skills are not checked")
++})
++
++Deno.test("finalize uses the checked level: a bullet the model called clear turns orange", () => {
++  const kb = parseKnowledgeBase(KB)
++  const out = finalizeFeedback(withItems([
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "Analyze server and log datasets using SQL to find performance trends.", roleWork: "clear", evidence: { tool: "SQL", action: "Analyze", result: null }, kbItems: ["MH2"] }),
++    item({ section: "EXPERIENCE", kind: "experience", excerpt: "Triaged 40 security alerts in Splunk and escalated 6 incidents.", roleWork: "none", evidence: { tool: "Splunk", action: "Triaged 40 security alerts", result: "escalated 6 incidents" } }),
++  ]), kb, "SOC Analyst", TERMS)
++  assert(out.items.map((i) => i.color).join() === "orange,green", out.items.map((i) => i.color).join())
++  assert(out.items.map((i) => i.grade).join() === "thin,core", "grades follow")
++  assert(out.issues.some((i) => i.excerpt!.startsWith("Analyze server") && i.issue === "This does not show work SOC Analyst does day to day."), "reason for the generic bullet")
++})
++
++// ---------- concrete skill names come from the knowledge base ----------
++
++Deno.test("parseSkillCatalog reads the lines and drops practitioner stars", () => {
++  const cat = parseSkillCatalog("Skills to list for MH1: Splunk, Microsoft Sentinel, Wazuh*\nSkills to list for sp1: Python, Bash\n- [MH1] x (y)\nnoise")
++  assert(cat.size === 2 && cat.get("MH1")!.join() === "Splunk,Microsoft Sentinel,Wazuh" && cat.get("SP1")!.join() === "Python,Bash", JSON.stringify([...cat]))
++})
++
++Deno.test("weak skills get varied ideas from several knowledge base items, never ones already listed", () => {
++  const kb = parseKnowledgeBase(KB)
++  const cat = new Map([
++    ["MH1", ["Splunk", "Sentinel", "QRadar"]],
++    ["MH2", ["Alert triage", "Runbooks", "Escalation"]],
++    ["SP1", ["Python", "Bash", "PowerShell"]],
++  ])
++  const weak = ["HTML", "CSS", "MySQL", "Excel", "Figma", "VS Code"].map((e) => skill(e, "offrole"))
++  const parsed = withItems([skill("Wireshark, Splunk", "core"), ...weak])
++  parsed.skillsMissing = ["MH1", "MH2", "SP1"]
++  parsed.skillIdeas = ["Linux"]
++  const out = finalizeFeedback(parsed, kb, "SOC Analyst", [], cat)
++  const fixes = ["HTML", "CSS", "MySQL"].map((e) => out.issues.find((i) => i.excerpt === e)!.solution)
++  assert(fixes[0] === "Try listing Sentinel or Alert triage here instead, if you have used them.", fixes[0])
++  assert(fixes[1] === "Try listing Python or QRadar here instead, if you have used them.", fixes[1])
++  assert(fixes[2] === "Try listing Runbooks or Bash here instead, if you have used them.", fixes[2])
++  assert(!fixes.some((f) => f.includes("Splunk")), "Splunk is already listed")
++  assert(new Set(fixes).size === 3, "no two neighbours get the same advice")
++})
++
++Deno.test("without catalog lines the model's ideas are used, as before", () => {
++  const kb = parseKnowledgeBase(KB)
++  const parsed = withItems([skill("HTML", "offrole")])
++  parsed.skillsMissing = ["MH1"]
++  parsed.skillIdeas = ["Linux", "Python"]
++  const out = finalizeFeedback(parsed, kb, "SOC Analyst")
++  assert(out.issues[0].solution === "Try listing Linux or Python here instead, if you have used them.", out.issues[0].solution)
++})
+diff --git a/supabase/functions/analyze-resume/llm.ts b/supabase/functions/analyze-resume/llm.ts
+index 32ce959..93725d3 100644
+--- a/supabase/functions/analyze-resume/llm.ts
++++ b/supabase/functions/analyze-resume/llm.ts
+@@ -28,6 +28,7 @@ export type Item = {
+   kbItems: string[]
+   fit: SkillFit | null // skills only
+   roleWork: RoleWork | null // experience and projects only: clear evidence, thin evidence or none of the role's day-to-day work
++  evidence: { tool: string | null; action: string | null; result: string | null } | null // experience and projects only: exact quotes from the bullet
+   certLevel: "role" | "foundational" | "unrelated" | null // certifications only
+   issue: string | null
+   solution: string | null
+@@ -345,6 +346,9 @@ export function parseFeedback(text: string): Feedback | null {
+           verdict,
+           kbItems: strList(it.kbItems).map((x) => x.toUpperCase()),
+           fit: FITS.has(String(it.fit).trim().toLowerCase()) ? (String(it.fit).trim().toLowerCase() as SkillFit) : null,
++          evidence: it.evidence && typeof it.evidence === "object"
++            ? { tool: cleanStr(it.evidence.tool), action: cleanStr(it.evidence.action), result: cleanStr(it.evidence.result) }
++            : null,
+           roleWork: ROLE_WORK.has(String(it.roleWork).trim().toLowerCase()) ? (String(it.roleWork).trim().toLowerCase() as RoleWork) : null,
+           certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
+           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
+diff --git a/supabase/functions/analyze-resume/llm_test.ts b/supabase/functions/analyze-resume/llm_test.ts
+index 75de61c..083188f 100644
+--- a/supabase/functions/analyze-resume/llm_test.ts
++++ b/supabase/functions/analyze-resume/llm_test.ts
+@@ -267,3 +267,12 @@ Deno.test("planAttempts: order, several Claude models, missing keys", () => {
+   assert(names({ ...base, anthropicKey: "", fallback: "gemini" }) === "gemini/g1,gemini/g2", "a provider without a key is skipped")
+   assert(planAttempts(base).every((a) => a.tries === 2), "two tries each")
+ })
++
++Deno.test("parseFeedback: evidence quotes are trimmed and optional", () => {
++  const out = parseFeedback(JSON.stringify({ strengths: ["a"], items: [
++    { section: "EXPERIENCE", kind: "experience", excerpt: "x", verdict: "weak", evidence: { tool: " Splunk ", action: "", result: 5 } },
++    { section: "SKILLS", kind: "skill", excerpt: "y", verdict: "relevant" },
++  ] }))!
++  assert(out.items[0].evidence!.tool === "Splunk" && out.items[0].evidence!.action === null && out.items[0].evidence!.result === null, "cleaned")
++  assert(out.items[1].evidence === null, "missing evidence is null")
++})

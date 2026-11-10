@@ -279,7 +279,7 @@
 </script>
 
 {#if (view === 'results' || (hasPendingResume() && view !== 'authenticating')) && user}
-  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onHelp={startTour} onSignOut={signOut} onTourReady={startFirstTour} />
+  <ResultsPage {user} onHome={returnHome} onRetry={retryUpload} onSignOut={signOut} onTourReady={startFirstTour} />
 {:else if view === 'authenticating' || hasPendingResume()}
   <main class="flex min-h-screen items-center justify-center px-6 text-center">
     <p class="font-display text-xl font-semibold">Signing in to start your analysis...</p>
