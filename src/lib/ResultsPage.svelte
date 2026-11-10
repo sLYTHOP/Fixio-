@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
   import { fly } from 'svelte/transition'
-  import { ArrowLeft, House, Sun, Moon, Check } from '@lucide/svelte'
+  import { ArrowLeft, ArrowRight, House, Sun, Moon, Check } from '@lucide/svelte'
   import { uploadResume, downloadResume, getLatestFeedback, supabase, joinWaitlist } from './supabase.js'
   import { getPendingResume, getPendingMeta, clearPendingResume, hasPendingResume } from './pendingResume.js'
   import { trackEvent } from './analytics.js'
@@ -75,11 +75,6 @@
     document.getElementById('selected-issue-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
-  $: overallLabel = ({
-    strong: 'Strong fit',
-    moderate: 'Partly there',
-    low: 'Early stage',
-  })[feedback?.overall?.level]
   function setResultsTheme(theme) {
     resultsTheme = theme
     try {
@@ -556,35 +551,13 @@
         {/if}
       </section>
 
-      <section class="review-summary" aria-label="Review summary">
-        <span class="summary-icon" aria-hidden="true">
-          {#if feedback.issues.length}
-            <span class="summary-count-icon">{feedback.issues.length}</span>
-          {:else}
-            ✓
-          {/if}
-        </span>
-        <div class="summary-copy">
-          {#if overallLabel && typeof feedback.overall.note === 'string' && feedback.overall.note.trim()}
-            <p class="overall-note">
-              <span class="overall-level">{overallLabel}</span>
-              <span>{feedback.overall.note}</span>
-            </p>
-          {/if}
-          <h2>{feedback.issues.length ? `${feedback.issues.length} ${feedback.issues.length === 1 ? 'area' : 'areas'} to strengthen` : 'No specific issues identified'}</h2>
-        </div>
-        <div class="summary-strengths">
-          <strong>{feedback.strengths.length}</strong>
-          <span>{feedback.strengths.length === 1 ? 'strength' : 'strengths'}</span>
-        </div>
-      </section>
-
       <section class="review-layout" aria-label="Resume and review notes">
         <div class="resume-column">
           <ResumePreview
             file={resumeFile}
             issues={feedback.issues}
             items={feedback.items ?? []}
+            colorCounts={feedback.colorCounts}
             {hoveredIssue}
             bind:activeIssue
             on:markselect={handleMarkSelect}
@@ -604,45 +577,49 @@
 
             {#if feedback.issues.length}
               {@const currentIssue = feedback.issues[currentIssueIndex]}
-              <article id="selected-issue-card" class="issue-card-item current-issue">
-                {#if currentIssue}
-                  <span class="issue-heading">
-                    <span class="issue-number">{currentIssueIndex + 1}</span>
-                    <span class="issue-section">{currentIssue.section}</span>
-                    {#if feedback.overall?.level === 'strong' && currentIssue.minor === true && getIssueColor(currentIssue) === 'orange'}
-                      <span class="issue-minor-tag">minor</span>
-                    {/if}
-                    <span class="issue-color-label">
-                      <i class="issue-color-marker {getIssueColor(currentIssue)}" aria-hidden="true"></i>
-                      {getIssueColorLabel(currentIssue)}
-                    </span>
-                  </span>
-                  <span class="issue-title">{currentIssue.issue}</span>
-                  <span class="issue-detail">
-                    <span class="solution-label">Suggested improvement</span>
-                    <span>{currentIssue.solution}</span>
-                  </span>
-                {/if}
-              </article>
-
-              <nav class="issue-navigation" aria-label="Review issue navigation">
+              <div class="issue-carousel">
                 <button
                   type="button"
                   class="issue-nav-button"
+                  aria-label="Previous"
                   disabled={currentIssueIndex === 0}
                   on:click={() => navigateIssue(-1)}
                 >
-                  Previous
+                  <ArrowLeft size={17} strokeWidth={2.2} aria-hidden="true" />
                 </button>
-                <span aria-live="polite">Issue {currentIssueIndex + 1} of {feedback.issues.length}</span>
+                <article id="selected-issue-card" class="issue-card-item current-issue">
+                  {#if currentIssue}
+                    <span class="issue-heading">
+                      <span class="issue-number">{currentIssueIndex + 1}</span>
+                      <span class="issue-section">{currentIssue.section}</span>
+                      {#if feedback.overall?.level === 'strong' && currentIssue.minor === true && getIssueColor(currentIssue) === 'orange'}
+                        <span class="issue-minor-tag">minor</span>
+                      {/if}
+                      <span class="issue-color-label">
+                        <i class="issue-color-marker {getIssueColor(currentIssue)}" aria-hidden="true"></i>
+                        {getIssueColorLabel(currentIssue)}
+                      </span>
+                    </span>
+                    <span class="issue-title">{currentIssue.issue}</span>
+                    <span class="issue-detail">
+                      <span class="solution-label">Suggested improvement</span>
+                      <span>{currentIssue.solution}</span>
+                    </span>
+                  {/if}
+                </article>
                 <button
                   type="button"
                   class="issue-nav-button"
+                  aria-label="Next"
                   disabled={currentIssueIndex >= feedback.issues.length - 1}
                   on:click={() => navigateIssue(1)}
                 >
-                  Next
+                  <ArrowRight size={17} strokeWidth={2.2} aria-hidden="true" />
                 </button>
+              </div>
+
+              <nav class="issue-navigation" aria-label="Review issue navigation">
+                <span aria-live="polite">Issue {currentIssueIndex + 1} of {feedback.issues.length}</span>
               </nav>
 
               {#if feedback.issues.length > 1}
@@ -1061,63 +1038,6 @@
     font-weight: 650;
   }
 
-  .review-summary {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 72px;
-    margin-bottom: 17px;
-    padding: 13px 17px;
-    border: 1px solid var(--line);
-    border-radius: 13px;
-    background: var(--surface);
-  }
-
-  .summary-icon {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
-    display: grid;
-    place-items: center;
-    border-radius: 10px;
-    background: var(--accent-tint);
-    color: var(--accent);
-    font-size: 17px;
-    font-weight: 750;
-  }
-
-  .summary-count-icon {
-    font-size: 13px;
-  }
-
-  .summary-copy {
-    flex: 1;
-  }
-
-  .overall-note {
-    display: flex;
-    align-items: baseline;
-    gap: 7px;
-    margin: 0 0 7px;
-    color: var(--ink-soft);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .overall-level {
-    flex: 0 0 auto;
-    color: var(--accent);
-    font-size: 10px;
-    font-weight: 750;
-    white-space: nowrap;
-  }
-
-  .summary-copy h2 {
-    margin: 0 0 3px;
-    font-size: 12px;
-    font-weight: 700;
-  }
-
   .issue-color-marker {
     width: 7px;
     height: 7px;
@@ -1128,22 +1048,6 @@
   .issue-color-marker.red { background: #e52323; }
   .issue-color-marker.orange { background: #e98a12; }
   .issue-color-marker.green { background: #218a31; }
-
-  .summary-strengths {
-    min-width: 78px;
-    padding-left: 15px;
-    border-left: 1px solid var(--line);
-    color: var(--ink-soft);
-    font-size: 10px;
-    line-height: 1.45;
-    text-align: right;
-  }
-
-  .summary-strengths strong {
-    display: block;
-    color: var(--ink);
-    font-size: 13px;
-  }
 
   .review-layout {
     display: grid;
@@ -1206,20 +1110,32 @@
     margin-top: 14px;
   }
 
+  .issue-carousel {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
   .issue-navigation {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 10px;
-    margin-top: 12px;
+    margin-top: 10px;
     color: var(--ink-soft);
     font-size: 10px;
     font-weight: 650;
   }
 
   .issue-nav-button {
-    min-height: 34px;
-    padding: 0 11px;
+    width: 34px;
+    min-width: 34px;
+    align-self: center;
+    display: grid;
+    place-items: center;
+    padding: 0;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: var(--surface-2);
@@ -1269,7 +1185,9 @@
 
   .current-issue {
     display: block;
-    margin-top: 14px;
+    flex: 0 1 390px;
+    max-width: 390px;
+    min-width: 0;
     cursor: default;
   }
 
@@ -1711,23 +1629,6 @@
       font-size: 11px;
     }
 
-    .review-summary {
-      min-height: 80px;
-      padding: 15px 20px;
-    }
-
-    .summary-copy h2 {
-      font-size: 14px;
-    }
-
-    .summary-strengths {
-      font-size: 11px;
-    }
-
-    .summary-strengths strong {
-      font-size: 15px;
-    }
-
     .review-layout {
       grid-template-columns: minmax(0, 1.18fr) minmax(350px, .82fr);
       gap: 20px;
@@ -1865,10 +1766,6 @@
       margin-top: 12px;
     }
 
-    .summary-strengths {
-      display: none;
-    }
-
     .review-layout {
       grid-template-columns: 1fr;
       gap: 12px;
@@ -1924,10 +1821,6 @@
       font-size: 10px;
     }
 
-    .review-summary {
-      gap: 10px;
-      padding: 12px;
-    }
   }
 
   @media (prefers-reduced-motion: reduce) {

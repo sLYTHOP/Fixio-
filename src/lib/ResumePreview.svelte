@@ -4,8 +4,21 @@
   export let file
   export let issues = []
   export let items = []
+  export let colorCounts = null
   export let activeIssue = null
   export let hoveredIssue = null
+
+  $: reviewColorCounts = {
+    red: Number.isFinite(colorCounts?.red)
+      ? colorCounts.red
+      : issues.filter((issue) => issue.color === 'red').length,
+    orange: Number.isFinite(colorCounts?.orange)
+      ? colorCounts.orange
+      : issues.filter((issue) => issue.color !== 'red' && issue.color !== 'green').length,
+    green: Number.isFinite(colorCounts?.green)
+      ? colorCounts.green
+      : items.filter((item) => item.color === 'green').length,
+  }
 
   const markColors = {
     red: 'rgb(255 35 35 / 55%)',
@@ -473,9 +486,9 @@
     <div>
       <p class="resume-preview-title font-display font-semibold">Your resume</p>
       <div class="resume-mark-legend" aria-label="Resume review colors">
-        <span><i class="legend-dot red"></i>Fix first</span>
-        <span><i class="legend-dot orange"></i>Weak</span>
-        <span><i class="legend-dot green"></i>Looks right</span>
+        <span><i class="legend-dot red"></i><strong>{reviewColorCounts.red}</strong> Fix first</span>
+        <span><i class="legend-dot orange"></i><strong>{reviewColorCounts.orange}</strong> Weak</span>
+        <span><i class="legend-dot green"></i><strong>{reviewColorCounts.green}</strong> Looks right</span>
       </div>
     </div>
     <a
