@@ -30,6 +30,7 @@ export type Item = {
   roleWork: RoleWork | null // experience and projects only: clear evidence, thin evidence or none of the role's day-to-day work
   evidence: { tool: string | null; action: string | null; result: string | null } | null // experience and projects only: exact quotes from the bullet
   certLevel: "role" | "foundational" | "unrelated" | null // certifications only
+  period: string | null // experience and projects only: the date range printed for the entry, quoted exactly (used to tell whether it is still going on)
   issue: string | null
   solution: string | null
 }
@@ -350,6 +351,7 @@ export function parseFeedback(text: string): Feedback | null {
             ? { tool: cleanStr(it.evidence.tool), action: cleanStr(it.evidence.action), result: cleanStr(it.evidence.result) }
             : null,
           roleWork: ROLE_WORK.has(String(it.roleWork).trim().toLowerCase()) ? (String(it.roleWork).trim().toLowerCase() as RoleWork) : null,
+          period: cleanStr(it.period),
           certLevel: CERT_LEVELS.has(String(it.certLevel).trim().toLowerCase()) ? (String(it.certLevel).trim().toLowerCase() as Item["certLevel"]) : null,
           issue: ok ? (cleanStr(it.issue) ?? DEFAULT_ITEM_ISSUE) : null,
           solution: ok ? (cleanStr(it.solution) ?? DEFAULT_ITEM_SOLUTION) : null,

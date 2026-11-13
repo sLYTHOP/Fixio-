@@ -93,7 +93,7 @@ const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/\s+/g, " ").
 // knowledge base ("Subject words: alert, incident, ..."). A bullet is "clear" only when it names the subject, says what
 // the candidate did (not "supported" or "contributed to"), and gives a tool or a result. The model supplies the tool,
 // action and result as exact quotes, and a quote that is not in the bullet is ignored.
-const WEAK_ACTION = /^(support|assist|contribut|help|work(ed|ing)? on|involv|participat|exposure|familiar|learn)/i
+const WEAK_ACTION = /^(support|assist|contribut|help|work(ed|ing)? on|involv|participat|exposure|familiar|learn|responsible|tasked|part of|observ|shadow|attend|duties)/i
 
 export function parseEvidenceTerms(content: string): string[] {
   const m = content.match(/^\s*Subject words:\s*(.+)$/im)
@@ -122,6 +122,52 @@ export function evidenceLevel(it: Item, terms: string[]): RoleWork | null {
   const action = inText(ev?.action, text) && !WEAK_ACTION.test(norm(ev?.action ?? ""))
   const proof = inText(ev?.tool, text) || inText(ev?.result, text)
   return action && proof ? "clear" : "thin"
+}
+
+// ---- what a thin bullet lacks, and how the fix is worded ----
+// Nothing here is specific to one role: the subject words come from the knowledge base, the rest is about how a bullet is written.
+// A fix about a bullet must never claim the candidate did work the bullet does not show, so every fix is a condition
+// ("If you did this work, ..."). The lead-in rotates so that neighbouring bullets do not all open the same way.
+export type BulletGap = "action" | "tool" | "proof"
+const LEADS = ["If you did this work, ", "Where this is true of your work, ", "If it matches what you did, "]
+const GAP_NAME: Record<BulletGap, string> = { action: "what you did yourself", tool: "the tool you used", proof: "a number or an outcome" }
+const GAP_FIX: Record<BulletGap, string> = {
+  action: "start with what you personally did, such as Investigated or Built, not supported or helped",
+  tool: "name the tool or platform you used",
+  proof: "add a number or an outcome, such as volume, time saved or what you delivered",
+}
+const lcFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s)
+const CONDITIONAL = /\b(if you|if it|once you|when you|where you|where this|in case you)\b/i
+
+// null when the model gave no quotes for the bullet (nothing to measure). A number anywhere in the bullet counts as scale.
+export function bulletGaps(it: Item): BulletGap[] | null {
+  if (!it.excerpt || !it.evidence) return null
+  const text = it.excerpt
+  const ev = it.evidence
+  const gaps: BulletGap[] = []
+  if (!(inText(ev.action, text) && !WEAK_ACTION.test(norm(ev.action ?? "")))) gaps.push("action")
+  if (!inText(ev.tool, text)) gaps.push("tool")
+  if (!(inText(ev.result, text) || /\d/.test(text))) gaps.push("proof")
+  return gaps
+}
+
+// A fix the model wrote for a bullet gets a condition unless it already has one.
+export function conditionalFix(solution: string, lead = LEADS[0]): string {
+  const s = solution.trim()
+  return !s || CONDITIONAL.test(s) ? s : lead + lcFirst(s)
+}
+
+const MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec".split("|")
+// Is the entry still going on? Decided from the date range the model quoted: "Present" and similar words, or an end month that is
+// this month or later. A range needs a start and an end. A single date is never treated as ongoing.
+export function isOngoing(period: string | null | undefined, today: Date): boolean {
+  if (!period) return false
+  if (/\b(present|currently|current|ongoing|till date|to date|now)\b/i.test(period)) return true
+  const parts = period.split(/\s*(?:[-\u2013\u2014]|\bto\b|\buntil\b)\s*/i)
+  if (parts.length < 2) return false
+  const m = parts[parts.length - 1].toLowerCase().match(new RegExp(`\\b(${MONTHS.join("|")})[a-z]*\\.?,?\\s+(\\d{4})\\b`))
+  if (!m) return false
+  return Number(m[2]) * 12 + MONTHS.indexOf(m[1]) >= today.getUTCFullYear() * 12 + today.getUTCMonth()
 }
 
 const shortLabel = (label: string) => label.split(":")[0].trim()
@@ -183,6 +229,7 @@ export function finalizeFeedback(
   roleLabel = "this role",
   evidenceTerms: string[] = [],
   skillCatalog: Map<string, string[]> = new Map(),
+  today: Date = new Date(),
 ): FinalFeedback {
   // The level of evidence for each experience and project bullet is worked out here (see evidenceLevel).
   parsed = { ...parsed, items: parsed.items.map((it) => ({ ...it, roleWork: evidenceLevel(it, evidenceTerms) })) }
@@ -252,6 +299,9 @@ export function finalizeFeedback(
       .map((x) => x.it),
   )
 
+  let leadNo = 0
+  const ongoingSaid = new Set<string>()
+  const handsOn = parsed.handsOnIdeas[0] ?? ""
   const items0: Item[] = parsed.items.map((it) => {
     const what = it.excerpt ?? "This skill"
     if (it.kind === "skill") {
@@ -284,15 +334,28 @@ export function finalizeFeedback(
     if ((it.kind === "experience" || it.kind === "project") && it.roleWork && it.roleWork !== "clear") {
       const thin = it.roleWork === "thin"
       const own = it.verdict !== "relevant"
+      const gaps = thin ? bulletGaps(it) : null
+      const lead = LEADS[leadNo++ % LEADS.length]
+      // An entry that is still going on: ask for the role's tasks instead of telling the candidate to add work not done yet.
+      // Said once per entry; the other bullets of the same entry get their own fix.
+      const ongoing = it.verdict !== "irrelevant" && isOngoing(it.period, today) && !ongoingSaid.has(it.period!)
+      if (ongoing) ongoingSaid.add(it.period!)
+      const fix = ongoing
+        ? `You are still in this role, so ask for tasks that ${roleLabel} does day to day${handsOn ? `, such as ${lcFirst(handsOn)}` : ""}, and add a bullet once you have done them.`
+        : thin && gaps?.length
+          ? `${lead}${listOf(gaps.map((g) => GAP_FIX[g]))}.`
+          : (own && it.solution && conditionalFix(it.solution, lead)) || (thin
+            ? "If you did this work, name the tool you used, what you did and what came out of it."
+            : "Add a bullet about related hands-on work, if you have done any.")
       return {
         ...it,
         verdict: it.verdict === "irrelevant" ? "irrelevant" : "weak",
         issue: (own && it.issue) || (thin
-          ? `This touches on work ${roleLabel} does day to day, but does not give enough evidence.`
+          ? gaps?.length
+            ? `This touches on work ${roleLabel} does day to day, but it does not show ${listOf(gaps.map((g) => GAP_NAME[g]))}.`
+            : `This touches on work ${roleLabel} does day to day, but does not give enough evidence.`
           : `This does not show work ${roleLabel} does day to day.`),
-        solution: (own && it.solution) || (thin
-          ? "Name the tool you used, what you did and what came out of it."
-          : "Add a bullet about related hands-on work, if you have done any."),
+        solution: fix,
       }
     }
     return it

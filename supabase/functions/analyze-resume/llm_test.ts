@@ -276,3 +276,14 @@ Deno.test("parseFeedback: evidence quotes are trimmed and optional", () => {
   assert(out.items[0].evidence!.tool === "Splunk" && out.items[0].evidence!.action === null && out.items[0].evidence!.result === null, "cleaned")
   assert(out.items[1].evidence === null, "missing evidence is null")
 })
+
+Deno.test("parseFeedback: period is kept for items and trimmed, null when missing", () => {
+  const out = parseFeedback(JSON.stringify({
+    strengths: ["a"],
+    items: [
+      { section: "EXPERIENCE", kind: "experience", excerpt: "x", verdict: "relevant", period: "  Jun 2026 - Present " },
+      { section: "EXPERIENCE", kind: "experience", excerpt: "y", verdict: "relevant" },
+    ],
+  }))!
+  assert(out.items[0].period === "Jun 2026 - Present" && out.items[1].period === null, "period trimmed or null")
+})

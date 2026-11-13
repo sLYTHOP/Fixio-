@@ -1,5 +1,5 @@
 // Run: deno test kb_test.ts
-import { buildMustHaveSummary, evidenceLevel, finalizeFeedback, gradeOf, issueColor, parseEvidenceTerms, parseSkillCatalog, parseKnowledgeBase, priorityFor } from "./kb.ts"
+import { buildMustHaveSummary, bulletGaps, conditionalFix, evidenceLevel, isOngoing, finalizeFeedback, gradeOf, issueColor, parseEvidenceTerms, parseSkillCatalog, parseKnowledgeBase, priorityFor } from "./kb.ts"
 import type { Feedback, Item } from "./llm.ts"
 
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error("FAILED: " + msg) }
@@ -71,7 +71,7 @@ Deno.test("older knowledge base without ids: no false source label", () => {
 // ---------- verdicts, colors and issues built in code ----------
 
 const item = (over: Partial<Item>): Item =>
-  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, evidence: null, certLevel: null, issue: null, solution: null, ...over })
+  ({ section: "SKILLS", kind: "skill", excerpt: "x", verdict: "relevant", kbItems: [], fit: null, roleWork: null, evidence: null, certLevel: null, period: null, issue: null, solution: null, ...over })
 const withItems = (items: Item[], mustHaves: Feedback["mustHaves"] = [], issues: Feedback["issues"] = []): Feedback =>
   ({ ...base(issues, mustHaves), items })
 
@@ -379,11 +379,11 @@ Deno.test("experience and projects: only clear evidence is green; thin and none 
   ]), kb, "SOC Analyst")
   assert(out.items.map((i) => i.color).join() === "green,orange,orange,orange", out.items.map((i) => i.color).join())
   const thin = out.issues.find((i) => i.excerpt === "log monitoring")!
-  assert(thin.issue === "This touches on work SOC Analyst does day to day, but does not give enough evidence." && thin.solution === "Name the tool you used, what you did and what came out of it.", thin.issue)
+  assert(thin.issue === "This touches on work SOC Analyst does day to day, but does not give enough evidence." && thin.solution.startsWith("If you did this work, name the tool you used, what you did and what came out of it"), thin.issue)
   const none = out.issues.find((i) => i.excerpt === "wrote security reports")!
   assert(none.issue === "This does not show work SOC Analyst does day to day.", none.issue)
   const own = out.issues.find((i) => i.excerpt === "fixed the printer")!
-  assert(own.issue === "off topic" && own.solution === "model fix", "the model's own reason and fix are kept")
+  assert(own.issue === "off topic" && /^(If you did this work|Where this is true of your work|If it matches what you did), model fix$/.test(own.solution), "the model's own reason is kept and its fix gets a condition: " + own.solution)
   assert(!out.issues.some((i) => i.excerpt === null && i.section === "EXPERIENCE"), "one clear entry: no section issue")
 })
 
@@ -528,4 +528,77 @@ Deno.test("without catalog lines the model's ideas are used, as before", () => {
   parsed.skillIdeas = ["Linux", "Python"]
   const out = finalizeFeedback(parsed, kb, "SOC Analyst")
   assert(out.issues[0].solution === "Try listing Linux or Python here instead, if you have used them.", out.issues[0].solution)
+})
+
+// ---------- gaps, conditional wording and ongoing entries ----------
+
+Deno.test("bulletGaps: names what a bullet lacks; no quotes means nothing to measure", () => {
+  const text = "Supported the team with security alerts"
+  const g = (ev: Item["evidence"], t = text) => bulletGaps(bullet(t, ev))
+  assert(g(null) === null, "no quotes: null")
+  assert(g({ tool: null, action: "Supported", result: null })!.join() === "action,tool,proof", "weak verb, no tool, no number")
+  assert(g({ tool: "Splunk", action: "Triaged", result: null }, "Triaged alerts in Splunk")!.join() === "proof", "only the outcome is missing")
+  assert(g({ tool: null, action: "Triaged", result: null }, "Triaged 40 alerts")!.join() === "tool", "a number in the bullet counts as scale")
+  assert(g({ tool: "Splunk", action: "Triaged", result: "cut noise" }, "Triaged alerts in Splunk to cut noise")!.length === 0, "nothing missing")
+  assert(g({ tool: "Wazuh", action: "Triaged", result: null }, "Triaged alerts")!.includes("tool"), "a tool that is not in the bullet is a gap")
+  assert(g({ tool: null, action: "Responsible for monitoring", result: null }, "Responsible for monitoring alerts")!.includes("action"), "responsible for is not an action")
+})
+
+Deno.test("conditionalFix: adds a condition once, keeps an existing one", () => {
+  assert(conditionalFix("Focus the bullet on visualizing security metrics.") === "If you did this work, focus the bullet on visualizing security metrics.", conditionalFix("Focus the bullet on visualizing security metrics."))
+  assert(conditionalFix("Add a bullet about related work, if you have done any.") === "Add a bullet about related work, if you have done any.", "already conditional")
+  assert(conditionalFix("Name the tool.", "Where this is true of your work, ") === "Where this is true of your work, name the tool.", "custom lead")
+  assert(conditionalFix("SQL joins help.") === "If you did this work, SQL joins help.", "an acronym keeps its capitals")
+  assert(conditionalFix("  ") === "", "empty")
+})
+
+Deno.test("isOngoing: present words and end months from today on; a single date or a past range is not ongoing", () => {
+  const today = new Date(Date.UTC(2026, 10, 13)) // 13 Nov 2026
+  assert(isOngoing("Jun 2026 - Present", today), "present")
+  assert(isOngoing("Aug 2026 \u2013 till date", today), "till date")
+  assert(isOngoing("Jul 2026 - Dec 2026", today), "ends after today")
+  assert(isOngoing("Sep 2026 to Nov 2026", today), "ends this month")
+  assert(!isOngoing("Jun 2026 - Aug 2026", today), "ended")
+  assert(!isOngoing("Nov 2026", today), "a single date")
+  assert(!isOngoing("2024 - 2025", today), "years only, past")
+  assert(!isOngoing(null, today) && !isOngoing("", today), "no period")
+})
+
+Deno.test("thin bullet: the issue and fix name what is missing and never assume the work was done", () => {
+  const kb = parseKnowledgeBase(KB)
+  const mk = (excerpt: string, evidence: Item["evidence"], period: string | null = "Jan 2025 - Mar 2025") =>
+    item({ section: "EXPERIENCE", kind: "experience", excerpt, evidence, period, verdict: "relevant" })
+  const out = finalizeFeedback(withItems([
+    mk("Supported the team with security alerts", { tool: null, action: "Supported", result: null }),
+    mk("Triaged alerts every day", { tool: null, action: "Triaged", result: null }),
+    mk("Triaged alerts in Splunk", { tool: "Splunk", action: "Triaged", result: null }),
+    mk("Monitored 30 alerts a day", { tool: null, action: "Monitored", result: "30 alerts a day" }),
+  ]), kb, "SOC Analyst", TERMS, new Map(), new Date(Date.UTC(2026, 10, 13)))
+  const a = out.issues.find((i) => i.excerpt === "Supported the team with security alerts")!
+  assert(a.issue === "This touches on work SOC Analyst does day to day, but it does not show what you did yourself, the tool you used and a number or an outcome.", a.issue)
+  assert(a.solution.startsWith("If you did this work, start with what you personally did") && a.solution.includes("name the tool") && a.solution.includes("add a number or an outcome"), a.solution)
+  const b = out.issues.find((i) => i.excerpt === "Triaged alerts every day")!
+  assert(b.issue.endsWith("it does not show the tool you used and a number or an outcome.") && b.solution.startsWith("Where this is true of your work, name the tool or platform you used and add a number"), b.solution + " | " + b.issue)
+  assert(!out.issues.some((i) => i.excerpt === "Triaged alerts in Splunk"), "action and a named tool: clear, stays green")
+  assert(!out.issues.some((i) => i.excerpt === "Monitored 30 alerts a day"), "clear bullet (action and result) stays green")
+  assert(a.solution.split(",")[0] !== b.solution.split(",")[0], "lead-ins rotate")
+})
+
+Deno.test("ongoing entry: ask for the role's tasks once per entry, other bullets get their own fix", () => {
+  const kb = parseKnowledgeBase(KB)
+  const mk = (excerpt: string, period: string, verdict: Item["verdict"] = "relevant") =>
+    item({ section: "EXPERIENCE", kind: "experience", excerpt, roleWork: "thin", period, verdict, evidence: null })
+  const parsed = withItems([
+    mk("Learning about alerts", "Jun 2026 - Present"),
+    mk("Reading security logs", "Jun 2026 - Present"),
+    mk("Learning about alerts at a past job", "Jan 2024 - Mar 2024"),
+    mk("Packed boxes", "Jun 2026 - Present", "irrelevant"),
+  ])
+  parsed.handsOnIdeas = ["Triage sample alerts in a free SIEM"]
+  const out = finalizeFeedback(parsed, kb, "SOC Analyst", [], new Map(), new Date(Date.UTC(2026, 10, 13)))
+  const sol = (e: string) => out.issues.find((i) => i.excerpt === e)!.solution
+  assert(sol("Learning about alerts") === "You are still in this role, so ask for tasks that SOC Analyst does day to day, such as triage sample alerts in a free SIEM, and add a bullet once you have done them.", sol("Learning about alerts"))
+  assert(!sol("Reading security logs").startsWith("You are still"), "said once per entry")
+  assert(!sol("Learning about alerts at a past job").startsWith("You are still"), "an ended entry is not ongoing")
+  assert(!sol("Packed boxes").startsWith("You are still"), "an unrelated job is not told to ask for role tasks")
 })

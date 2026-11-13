@@ -533,7 +533,7 @@
                 class:active={visibleIssue === mark.issueIndex}
                 class="resume-mark"
                 style="left: {mark.left}px; top: {mark.top}px; width: {mark.width}px; height: {mark.height}px; background: {getMarkColor(mark.color)};"
-                aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}. Suggested fix: {issues[mark.issueIndex].solution}"
+                aria-label="Issue in {issues[mark.issueIndex].section}: {issues[mark.issueIndex].issue}"
                 aria-pressed={activeIssue === mark.issueIndex}
                 on:mouseenter={() => (hoveredMarkIssue = mark.issueIndex)}
                 on:mouseleave={() => (hoveredMarkIssue = null)}
@@ -556,12 +556,12 @@
 
           {#if hoveredMark?.pageNumber === page.number}
             <div
-              class="solution-popover"
+              class="issue-popover"
               style="left: {Math.max(8, Math.min(hoveredMark.left, page.width - 296))}px; top: {Math.max(8, hoveredMark.top - 82)}px;"
               role="status"
             >
-              <p class="text-xs font-bold uppercase tracking-wide">Suggested fix</p>
-              <p class="mt-1 text-sm">{issues[hoveredMark.issueIndex].solution}</p>
+              <p class="text-xs font-bold uppercase tracking-wide">Issue</p>
+              <p class="mt-1 text-sm">{issues[hoveredMark.issueIndex].issue}</p>
             </div>
           {/if}
         </div>
@@ -653,7 +653,7 @@
     outline-offset: 1px;
   }
 
-  .solution-popover {
+  .issue-popover {
     position: absolute;
     z-index: 3;
     width: min(280px, calc(100% - 16px));
