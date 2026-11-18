@@ -591,9 +591,8 @@
                   disabled={currentIssueIndex === 0}
                   on:click={() => navigateIssue(-1)}
                 >
-                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M9 14 4 9l5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M4 9h10a6 6 0 0 1 0 12h-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M2.2 21.1C2.1 20.3 3.1 12.8 8 8.7c3.7-3.1 8.3-3.8 12.4-2.9V2.6c0-.7.8-1.1 1.4-.6l6 5.3c.5.4.5 1.1 0 1.5l-6 5.3c-.6.5-1.4.1-1.4-.6V9.7c-4.8-.6-8.6 1.2-10.9 4.7-1.8 2.7-2.5 5.5-2.6 7-.1.6-.8.9-1.3.5l-3.4-3.2v-2.6Z" transform="translate(-1.3 0) scale(.92)" />
                   </svg>
                 </button>
                 <article id="selected-issue-card" class="issue-card-item current-issue">
@@ -623,9 +622,8 @@
                   disabled={currentIssueIndex >= feedback.issues.length - 1}
                   on:click={() => navigateIssue(1)}
                 >
-                  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="m15 14 5-5-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M20 9H10a6 6 0 0 0 0 12h1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M2.2 21.1C2.1 20.3 3.1 12.8 8 8.7c3.7-3.1 8.3-3.8 12.4-2.9V2.6c0-.7.8-1.1 1.4-.6l6 5.3c.5.4.5 1.1 0 1.5l-6 5.3c-.6.5-1.4.1-1.4-.6V9.7c-4.8-.6-8.6 1.2-10.9 4.7-1.8 2.7-2.5 5.5-2.6 7-.1.6-.8.9-1.3.5l-3.4-3.2v-2.6Z" transform="translate(-1.3 0) scale(.92)" />
                   </svg>
                 </button>
               </div>
@@ -1120,10 +1118,7 @@
   }
 
   .issue-carousel {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+    position: relative;
     margin-top: 14px;
   }
 
@@ -1139,24 +1134,39 @@
   }
 
   .issue-nav-button {
-    width: 42px;
-    min-width: 42px;
-    height: 42px;
-    align-self: center;
+    position: absolute;
+    bottom: 10px;
+    z-index: 2;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
     display: grid;
     place-items: center;
     padding: 0;
     border: 1px solid var(--line);
-    border-radius: 50%;
+    border-radius: 8px;
     background: var(--surface-2);
     color: var(--ink);
     font: inherit;
     cursor: pointer;
   }
 
+  .issue-nav-button:first-of-type {
+    left: 10px;
+  }
+
+  .issue-nav-button:last-of-type {
+    right: 10px;
+  }
+
+  .issue-nav-button:first-of-type svg {
+    transform: scaleX(-1);
+  }
+
   .issue-nav-button:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
     background: var(--surface);
+    color: var(--accent);
   }
 
   .issue-nav-button:disabled {
@@ -1195,9 +1205,10 @@
 
   .current-issue {
     display: block;
-    flex: 0 1 460px;
-    max-width: 460px;
+    width: 100%;
     min-width: 0;
+    min-height: 118px;
+    padding-bottom: 52px;
     cursor: default;
   }
 
